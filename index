@@ -1,0 +1,837 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>تمرين اللغة الإنجليزية</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700&family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #1a202c;
+            --primary-color: #2d3748;
+            --text-color: #E2E8F0;
+            --highlight-color: #4299E1;
+            --accent-color: #38B2AC;
+            --tile-bg: #2d3748;
+            --tile-border: #4A5568;
+            --font-family-ar: 'Tajawal', sans-serif;
+            --font-family-en: 'Roboto', sans-serif;
+            --success-color: #48BB78;
+            --error-color: #F56565;
+            --waiting-color: #A0AEC0;
+            --locked-color: #718096;
+            
+            /* SRS Stage Colors */
+            --srs-color-0: #4A5568; /* Learning */
+            --srs-color-1: #3182CE; /* Stage 1 */
+            --srs-color-2: #38A169; /* Stage 2 */
+            --srs-color-3: #D69E2E; /* Stage 3 */
+            --srs-color-4: #DD6B20; /* Stage 4 */
+            --srs-color-5: #805AD5; /* Mastered */
+        }
+
+        body {
+            font-family: var(--font-family-ar);
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            overflow: hidden;
+            text-align: center;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 800px;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+
+        .screen {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            background-color: var(--primary-color);
+            border: 1px solid var(--tile-border);
+            border-radius: 20px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+            padding: 20px;
+            box-sizing: border-box;
+            position: relative;
+        }
+        .scrollable-screen { justify-content: flex-start; padding-top: 5vh; }
+
+        .hidden { display: none !important; }
+        .highlight-text { color: var(--highlight-color); }
+        .highlight { color: var(--highlight-color); font-weight: 700; }
+
+        .back-btn {
+            position: absolute; top: 20px; left: 20px; background: var(--tile-bg);
+            border: 1px solid var(--tile-border); color: var(--highlight-color);
+            width: 40px; height: 40px; border-radius: 50%; font-size: 1.5rem;
+            cursor: pointer; display: flex; justify-content: center; align-items: center; z-index: 20;
+        }
+        
+        .screen-title { font-size: 2.5rem; margin-bottom: 15px; }
+
+        .btn {
+            background: linear-gradient(145deg, var(--accent-color), var(--highlight-color));
+            color: white; border: none; padding: 15px 35px; border-radius: 50px;
+            font-size: 1.2rem; font-family: var(--font-family-ar); font-weight: 700;
+            cursor: pointer; transition: transform 0.2s, box-shadow 0.3s;
+            box-shadow: 0 4px 20px rgba(66, 153, 225, 0.2); margin-top: 20px;
+        }
+        .btn.secondary { background: var(--tile-bg); border: 1px solid var(--highlight-color); color: var(--highlight-color); }
+        .btn:hover { transform: translateY(-3px); box-shadow: 0 6px 25px rgba(66, 153, 225, 0.3); }
+        .btn:disabled { background: var(--tile-border); cursor: not-allowed; box-shadow: none; transform: none; }
+
+        #start-screen-buttons { display: flex; gap: 20px; margin-top: 20px; }
+        .icon-btn {
+            background: var(--tile-bg); border: 1px solid var(--tile-border);
+            color: var(--text-color); padding: 12px 15px; border-radius: 12px;
+            font-size: 1rem; cursor: pointer; transition: all 0.2s;
+            display: flex; flex-direction: column; align-items: center; gap: 8px; width: 120px;
+        }
+        .icon-btn svg { width: 32px; height: 32px; stroke: var(--highlight-color); }
+        .icon-btn:hover { border-color: var(--highlight-color); background-color: var(--primary-color); }
+
+        #level-list, #lesson-list { display: flex; gap: 20px; flex-wrap: wrap; justify-content: center; }
+        .level-card, .lesson-card {
+            background-color: var(--tile-bg); border: 2px solid var(--tile-border);
+            border-radius: 15px; padding: 30px 50px; font-size: 2rem;
+            font-family: var(--font-family-en); font-weight: 700; cursor: pointer;
+            transition: transform 0.2s, border-color 0.3s;
+        }
+        .level-card { font-family: var(--font-family-ar); }
+        .level-card:hover, .lesson-card:hover { transform: translateY(-5px); border-color: var(--highlight-color); }
+
+        .list-container {
+            width: 100%; max-width: 700px; height: 65vh; overflow-y: auto;
+            background: var(--bg-color); padding: 10px; border-radius: 15px; border: 1px solid var(--tile-border);
+        }
+        
+        .sentence-card {
+            background-color: var(--tile-bg); border-left: 5px solid var(--accent-color);
+            border-radius: 8px; padding: 15px; margin-bottom: 12px; text-align: right;
+        }
+        .sc-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+        .sc-rep-counter { font-size: 0.9rem; padding: 4px 10px; border-radius: 15px; font-weight: 700; background-color: rgba(74, 85, 104, 0.3); color: var(--waiting-color); }
+        .sc-rep-counter.completed { background-color: rgba(72, 187, 120, 0.2); color: var(--success-color); }
+        .sc-context { font-size: 0.9rem; color: var(--accent-color); margin-bottom: 8px; }
+        .sc-en { font-family: var(--font-family-en); font-size: 1.2rem; font-weight: 500; direction: ltr; margin-bottom: 8px; }
+        .sc-ar { font-size: 1rem; color: var(--waiting-color); margin-bottom: 12px; }
+        .sc-pronunciation { border-top: 1px solid var(--tile-border); padding-top: 8px; font-size: 0.85rem; color: #A0AEC0; font-family: var(--font-family-en); direction: ltr; }
+        .sc-pronunciation div { margin-bottom: 4px; }
+        .sc-tip {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.85rem;
+            color: var(--accent-color);
+            background-color: rgba(56, 178, 172, 0.1);
+            padding: 8px 12px;
+            border-radius: 6px;
+            margin: 10px 0;
+            text-align: right;
+            border-right: 3px solid var(--accent-color);
+        }
+        .sc-tip svg {
+            width: 18px;
+            height: 18px;
+            stroke: var(--accent-color);
+            flex-shrink: 0;
+        }
+
+        /* Review Center */
+        .review-stage-section { width: 100%; margin-bottom: 20px; }
+        .review-stage-title { text-align: right; font-size: 1.2rem; font-weight: 700; padding-bottom: 5px; margin-bottom: 10px; border-bottom: 2px solid var(--tile-border); }
+        .review-lesson-card {
+            background-color: var(--tile-bg); border-radius: 8px; padding: 15px;
+            margin-bottom: 12px; cursor: pointer; transition: background-color 0.2s;
+            border-left: 5px solid var(--tile-border);
+        }
+        .review-lesson-card.locked { cursor: not-allowed; opacity: 0.6; }
+        .review-lesson-card[data-srs-stage="0"] { border-left-color: var(--srs-color-0); }
+        .review-lesson-card[data-srs-stage="1"] { border-left-color: var(--srs-color-1); }
+        .review-lesson-card[data-srs-stage="2"] { border-left-color: var(--srs-color-2); }
+        .review-lesson-card[data-srs-stage="3"] { border-left-color: var(--srs-color-3); }
+        .review-lesson-card[data-srs-stage="4"] { border-left-color: var(--srs-color-4); }
+        .review-lesson-card[data-srs-stage="5"] { border-left-color: var(--srs-color-5); }
+        .review-lesson-card-header { display: flex; justify-content: space-between; align-items: center; }
+        .review-lesson-title { font-size: 1.5rem; font-family: var(--font-family-en); font-weight: 700; }
+        .review-lesson-status-icon { width: 24px; height: 24px; }
+        .review-lesson-countdown { font-size: 0.9rem; color: var(--waiting-color); margin-top: 8px; text-align: right; font-family: var(--font-family-en); }
+        .review-lesson-sentences { display: none; margin-top: 15px; border-top: 1px solid var(--tile-border); padding-top: 15px; }
+        
+        /* Practice Screen */
+        #practice-screen h2 { font-size: 2rem; margin-bottom: 10px; }
+        #practice-banner { width: 90%; max-width: 600px; min-height: 280px; border: 2px solid var(--highlight-color); border-radius: 15px; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 20px; position: relative; overflow: hidden; transition: transform 0.1s ease-out; cursor: pointer; }
+        #practice-banner.clicked { transform: scale(0.98); border-color: var(--accent-color); }
+        #practice-speaker-icon { position: absolute; top: 15px; right: 15px; cursor: pointer; z-index: 5; }
+        #practice-speaker-icon svg { width: 28px; height: 28px; stroke: var(--waiting-color); transition: stroke 0.2s; }
+        #practice-speaker-icon:hover svg { stroke: var(--highlight-color); }
+        #practice-context, #practice-text-ar, #practice-text-en, #pronunciation-container { margin-bottom: 15px; }
+        #practice-context { font-family: var(--font-family-ar); font-size: 1.1rem; font-weight: 500; color: var(--accent-color); padding: 5px 15px; background-color: rgba(56, 178, 172, 0.1); border-radius: 20px; }
+        #practice-text-ar { font-family: var(--font-family-ar); font-size: 1.2rem; color: #A0AEC0; }
+        #practice-text-en { font-family: var(--font-family-en); font-size: 1.6rem; direction: ltr; }
+        #pronunciation-container { width: 90%; border-top: 1px solid var(--tile-border); padding-top: 10px; }
+        .pronunciation-text { font-size: 1rem; color: #A0AEC0; margin-top: 5px; font-family: var(--font-family-en); direction: ltr; }
+        #practice-pronunciation-ar { font-family: var(--font-family-ar); direction: rtl; }
+        #practice-controls { display: flex; align-items: center; margin-top: 20px; }
+        #practice-counter { font-size: 1.5rem; color: var(--highlight-color); min-width: 150px; text-align: left; font-family: var(--font-family-en); }
+        
+        /* Writing Exercise Screen */
+        #writing-exercise-input {
+            background-color: var(--bg-color);
+            border: 2px solid var(--tile-border);
+            color: var(--text-color);
+            padding: 15px;
+            border-radius: 10px;
+            font-size: 1.5rem;
+            text-align: center;
+            width: 80%;
+            max-width: 300px;
+            margin-top: 20px;
+            font-family: var(--font-family-en);
+        }
+        #writing-exercise-input:focus {
+            outline: none;
+            border-color: var(--highlight-color);
+        }
+        #writing-exercise-feedback {
+            min-height: 24px;
+            margin-top: 15px;
+            font-weight: bold;
+        }
+        .feedback-correct { color: var(--success-color); }
+        .feedback-incorrect { color: var(--error-color); }
+        #writing-exercise-buttons { display: flex; gap: 15px; }
+
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <!-- Start Screen -->
+        <div id="start-screen" class="screen">
+            <h1 class="highlight-text">تمرين الإنجليزية</h1>
+            <p>اختر "ابدأ الدروس" لتعلّم كلمات جديدة، أو اذهب إلى "مركز المراجعة" لتمرين الكلمات التي تعلمتها.</p>
+            <div id="start-screen-buttons">
+                <button id="go-to-level-selection-btn" class="icon-btn">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25" /></svg>
+                    <span>ابدأ الدروس</span>
+                </button>
+                <button id="go-to-review-center-btn" class="icon-btn">
+                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0h18M12 15.75h.008v.008H12v-.008Z" /></svg>
+                    <span>مركز المراجعة</span>
+                </button>
+            </div>
+        </div>
+        
+        <!-- Review Center Screen -->
+        <div id="review-center-screen" class="screen scrollable-screen hidden">
+            <div class="back-btn" id="back-to-start-from-review">→</div>
+            <h2 class="screen-title highlight-text">مركز المراجعة</h2>
+            <div id="review-list-container" class="list-container"></div>
+            <button id="start-global-review-btn" class="btn">ابدأ المراجعة</button>
+        </div>
+
+        <!-- Level Selection Screen -->
+        <div id="level-selection-screen" class="screen hidden">
+            <div class="back-btn" id="back-to-start-from-level-select">→</div>
+            <h2 class="screen-title highlight-text">اختر المستوى</h2>
+            <div id="level-list"></div>
+        </div>
+
+        <!-- Lesson Selection Screen -->
+        <div id="lesson-selection-screen" class="screen hidden">
+            <div class="back-btn" id="back-to-level-select-from-lesson">→</div>
+            <h2 class="screen-title highlight-text">اختر الدرس</h2>
+            <div id="lesson-list"></div>
+        </div>
+
+        <!-- Lesson Screen -->
+        <div id="lesson-screen" class="screen scrollable-screen hidden">
+            <div class="back-btn" id="back-to-lesson-select-from-lesson-view">→</div>
+            <h2 id="lesson-view-title" class="screen-title highlight-text"></h2>
+            <div id="lesson-sentence-list" class="list-container"></div>
+            <button id="start-lesson-practice-btn" class="btn">ابدأ تمرين الدرس</button>
+        </div>
+        
+        <!-- Practice Screen -->
+        <div id="practice-screen" class="screen hidden">
+            <div class="back-btn" id="back-to-previous-screen">→</div>
+            <h2 class="screen-title highlight-text">التمرين</h2>
+            <div id="practice-banner">
+                <div id="practice-speaker-icon">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M19.114 5.636a9 9 0 0 1 0 12.728M16.463 8.288a5.25 5.25 0 0 1 0 7.424M6.75 8.25l4.72-4.72a.75.75 0 0 1 1.28.53v15.88a.75.75 0 0 1-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 0 1 2.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75Z" /></svg>
+                </div>
+                <div id="practice-context"></div>
+                <div id="practice-text-ar"></div>
+                <div id="practice-text-en" class="highlight-text"></div>
+                <div id="pronunciation-container">
+                    <div id="practice-pronunciation-en" class="pronunciation-text"></div>
+                    <div id="practice-pronunciation-ar" class="pronunciation-text"></div>
+                </div>
+                <div id="practice-tip-container"></div>
+            </div>
+            <div id="practice-controls">
+                <div id="practice-counter">0 / 0</div>
+            </div>
+        </div>
+
+        <!-- Writing Exercise Screen -->
+        <div id="writing-exercise-screen" class="screen hidden">
+            <h2 class="screen-title highlight-text">تمرين كتابي</h2>
+            <p>لترسيخ الكلمة، حاول كتابتها من ذاكرتك.</p>
+            <input type="text" id="writing-exercise-input" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+            <div id="writing-exercise-feedback"></div>
+            <div id="writing-exercise-buttons">
+                <button id="writing-exercise-check-btn" class="btn">تحقق</button>
+                <button id="writing-exercise-skip-btn" class="btn secondary">تخطي</button>
+            </div>
+        </div>
+
+        <!-- Session Complete Screen -->
+        <div id="session-complete-screen" class="screen hidden">
+             <h2 class="screen-title highlight-text">ممتاز!</h2>
+             <p>لقد أتممت الجلسة. عمل رائع!</p>
+             <button id="back-to-main-from-complete" class="btn">العودة للقائمة الرئيسية</button>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // --- CONSTANTS & DATA ---
+            const STORAGE_KEY = 'english_srs_progress_v3';
+            // Corrected SRS schedule
+            const SRS_STAGES = [
+                // Stage 0: Learning phase
+                { name: "مرحلة التعلم", intervalDays: 1, reps: 6 }, // After learning, next review is in 1 day
+                // Stage 0: Learning phase
+                { name: "مراجعة اليوم التالي", intervalDays: 1, reps: 4 }, // After 1st review, next is in 3 days (total 4 days from start)
+                // Stage 2: Second review (Day 4)
+                { name: "مراجعة بعد 3 أيام", intervalDays: 7, reps: 3 }, // After 2nd review, next is in 7 days (total 11 days from start)
+                // Stage 3: Third review (Day 11)
+                { name: "مراجعة بعد 7 أيام", intervalDays: 19, reps: 2 }, // After 3rd review, next is in 19 days (total 30 days from start)
+                // Stage 4: Fourth review (Day 30)
+                { name: "مراجعة بعد 30 يومًا", intervalDays: 30, reps: 2 }, // After 4th review, next is in 30 days (mastery practice)
+                // Stage 5: Mastered
+                { name: "مرحلة الإتقان", intervalDays: Infinity, reps: 0 }
+            ];
+            const LESSON_LIBRARY = {
+                "المستوى الأول": {
+                    'about': {
+                        title: "about",
+                        sentences: [
+                            { id: "ab_01", en: "I read a book about animals.", ar: "قرأت كتابًا عن الحيوانات.", context: "حرف جر: عن / بخصوص", highlight: "about", pronunciation_en: "/aɪ rɛd ə bʊk əˈbaʊt ˈænɪməlz/", pronunciation_ar: "آي ريد أَ بوك أَباوت آنيمالز.", tip_ar: "الفعل 'read' في الماضي يُنطق 'red' لكن يكتب بنفس الشكل. 'about' توضح موضوع الكتاب." },
+                            { id: "ab_02", en: "What about going to the park?", ar: "ماذا عن الذهاب إلى الحديقة؟", context: "مع السؤال: “What about…?”", highlight: "What about", pronunciation_en: "/wɒt əˈbaʊt ˈɡoʊɪŋ tə ðə pɑːrk?/", pronunciation_ar: "وات أَباوت غوينغ تو ذَا بارك؟", tip_ar: "التركيب 'What about...?' يستخدم لتقديم اقتراح. الفعل الذي يليه يأخذ '-ing'." },
+                            { id: "ab_03", en: "I have about $10.", ar: "لدي حوالي 10 دولارات.", context: "ظرف: تقريبًا / حوالي", highlight: "about", pronunciation_en: "/aɪ hæv əˈbaʊt tɛn ˈdɒlərz/", pronunciation_ar: "آي هاف أَباوت تين دولارز.", tip_ar: "هنا 'about' تعني 'تقريبًا' أو 'حوالي' وتأتي قبل الأرقام والكميات." },
+                            { id: "ab_04", en: "The class starts at about 9 o’clock.", ar: "يبدأ الدرس حوالي الساعة 9.", context: "مع الوقت", highlight: "about", pronunciation_en: "/ðə klɑːs stɑːrts æt əˈbaʊt naɪn əˈklɒk/", pronunciation_ar: "ذَا كلاس ستارتس آت أَباوت ناين أُكلوك.", tip_ar: "الفعل 'starts' يأخذ 's' لأنه مع الفاعل المفرد 'The class' في زمن المضارع البسيط." },
+                            { id: "ab_05", en: "He’s about 12 years old.", ar: "عمره حوالي 12 سنة.", context: "مع العمر / الطول / المسافة", highlight: "about", pronunciation_en: "/hiz əˈbaʊt twɛlv jɪərz oʊld/", pronunciation_ar: "هيز أَباوت تويلف ييرز أولد.", tip_ar: "'He's' هي اختصار لـ 'He is'. نستخدم 'about' مع العمر والقياسات لقول 'حوالي'." },
+                            { id: "ab_06", en: "This phone is about the same as mine.", ar: "هذا الهاتف بنفس سعر هاتفي تقريبًا.", context: "في المقارنة", highlight: "about the same", pronunciation_en: "/ðɪs foʊn ɪz əˈbaʊt ðə seɪm æz maɪn/", pronunciation_ar: "ذيس فون إز أَباوت ذَا سيم آز ماين.", tip_ar: "التركيب 'the same as' يستخدم للمقارنة بين شيئين متماثلين." },
+                            { id: "ab_07", en: "I’m about to leave.", ar: "أنا على وشك المغادرة.", context: "مع “to be about to”", highlight: "about to", pronunciation_en: "/aɪm əˈbaʊt tə liːv/", pronunciation_ar: "آيم أَباوت تو ليف.", tip_ar: "التركيب 'to be about to' + (فعل) يعني 'على وشك أن يفعل شيئًا'." },
+                            { id: "ab_08", en: "She talked about her trip.", ar: "تحدثت عن رحلتها.", context: "مع \"ask/talk/know about\"", highlight: "about", pronunciation_en: "/ʃi tɔːkt əˈbaʊt hər trɪp/", pronunciation_ar: "شي توكت أَباوت هير تريب.", tip_ar: "الفعل 'talked' هو الماضي من 'talk'. نضيف '-ed' للأفعال المنتظمة في الماضي." },
+                            { id: "ab_09", en: "It’s about time!", ar: "حان الوقت!", context: "في التعبيرات اليومية", highlight: "about time", pronunciation_en: "/ɪts əˈbaʊt taɪm!/", pronunciation_ar: "إتس أَباوت تايم!", tip_ar: "التعبير 'It's about time!' يعني 'لقد حان الوقت أخيرًا' ويستخدم للتعبير عن نفاد الصبر." },
+                            { id: "ab_10", en: "Don’t worry about it.", ar: "لا تقلق بشأن ذلك.", context: "في التعبيرات اليومية", highlight: "about it", pronunciation_en: "/doʊnt ˈwʌri əˈbaʊt ɪt/", pronunciation_ar: "دونت ووري أَباوت إت.", tip_ar: "'Don't' هي اختصار لـ 'Do not' وتستخدم للنفي في زمن المضارع البسيط." },
+                        ]
+                    }
+                }
+            };
+            
+            // --- DOM Elements ---
+            const screens = {
+                start: document.getElementById('start-screen'),
+                reviewCenter: document.getElementById('review-center-screen'),
+                levelSelection: document.getElementById('level-selection-screen'),
+                lessonSelection: document.getElementById('lesson-selection-screen'),
+                lesson: document.getElementById('lesson-screen'),
+                practice: document.getElementById('practice-screen'),
+                writingExercise: document.getElementById('writing-exercise-screen'),
+                sessionComplete: document.getElementById('session-complete-screen'),
+            };
+            
+            // --- State ---
+            let progress = {};
+            let practiceList = [];
+            let currentPracticeItem = null;
+            let currentLevelKey = null;
+            let currentLessonKey = null;
+            let lastPracticedLessonKey = null;
+            let previousScreen = 'start';
+            let countdownInterval = null;
+            let voices = [];
+
+            // --- Audio ---
+            function loadVoices() {
+                voices = window.speechSynthesis.getVoices();
+                if (voices.length === 0) {
+                    window.speechSynthesis.onvoiceschanged = () => {
+                        voices = window.speechSynthesis.getVoices();
+                    };
+                }
+            }
+
+            function speakSentence(text) {
+                if (!('speechSynthesis' in window)) return;
+                if (voices.length === 0) loadVoices();
+
+                const utterance = new SpeechSynthesisUtterance(text);
+                const englishVoice = voices.find(voice => voice.lang.startsWith('en-US') || voice.lang.startsWith('en-GB'));
+                utterance.voice = englishVoice || voices.find(voice => voice.lang.startsWith('en-'));
+                utterance.lang = 'en-US';
+                utterance.rate = 0.4; // Slower speed
+                window.speechSynthesis.cancel();
+                window.speechSynthesis.speak(utterance);
+            }
+
+            // --- Progress & SRS Logic ---
+            function loadProgress() {
+                const savedProgress = localStorage.getItem(STORAGE_KEY);
+                progress = savedProgress ? JSON.parse(savedProgress) : {};
+            }
+
+            function saveProgress() {
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(progress));
+            }
+            
+            function initializeLessonProgress(lessonKey) {
+                if (!progress[lessonKey]) {
+                    const lessonSentences = getLessonSentences(lessonKey);
+                    progress[lessonKey] = {
+                        stage: 0,
+                        lastCompletion: null,
+                        sentenceProgress: lessonSentences.reduce((acc, s) => {
+                            acc[s.id] = 0;
+                            return acc;
+                        }, {})
+                    };
+                    saveProgress();
+                }
+            }
+
+            function getLessonSentences(lessonKey) {
+                for (const level of Object.values(LESSON_LIBRARY)) {
+                    if (level[lessonKey]) {
+                        return level[lessonKey].sentences;
+                    }
+                }
+                return [];
+            }
+            
+            function getLessonStatus(lessonKey) {
+                const lessonProgress = progress[lessonKey];
+                if (!lessonProgress || lessonProgress.stage === 0) {
+                    return { status: 'learning', stage: 0 };
+                }
+
+                if (lessonProgress.stage >= SRS_STAGES.length -1) {
+                    return { status: 'mastered', stage: lessonProgress.stage };
+                }
+
+                const completionTime = new Date(lessonProgress.lastCompletion).getTime();
+                const intervalMillis = SRS_STAGES[lessonProgress.stage].intervalDays * 24 * 60 * 60 * 1000;
+                const dueTime = completionTime + intervalMillis;
+                const now = new Date().getTime();
+                
+                if (now >= dueTime) {
+                    return { status: 'active', stage: lessonProgress.stage };
+                } else {
+                    return { status: 'locked', stage: lessonProgress.stage, dueTimestamp: dueTime };
+                }
+            }
+            
+            // --- UI & Flow Management ---
+            function showScreen(screenName, fromScreen = null) {
+                if (fromScreen) previousScreen = fromScreen;
+                Object.values(screens).forEach(screen => screen.classList.add('hidden'));
+                screens[screenName].classList.remove('hidden');
+                
+                if (countdownInterval) {
+                    clearInterval(countdownInterval);
+                    countdownInterval = null;
+                }
+                if(screenName === 'reviewCenter') {
+                    populateReviewCenter();
+                }
+            }
+            
+            function createSentenceCard(sentence, repsDone, repsNeeded) {
+                const card = document.createElement('div');
+                card.className = 'sentence-card';
+                const isCompleted = repsDone >= repsNeeded;
+                
+                card.innerHTML = `
+                    <div class="sc-header">
+                        <div class="sc-rep-counter ${isCompleted ? 'completed' : ''}">${repsDone} / ${repsNeeded}</div>
+                        <div class="sc-context">${sentence.context}</div>
+                    </div>
+                    ${sentence.tip_ar ? `
+                    <div class="sc-tip">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M12 18v-5.25m0 0a6.01 6.01 0 0 0 1.5-.189m-1.5.189a6.01 6.01 0 0 1-1.5-.189m3.75 7.478a12.06 12.06 0 0 1-4.5 0m3.75 2.311a7.5 7.5 0 0 1-7.5 0c-1.42-1.42-2.5-3.52-2.5-6.097C4.5 6.097 6.75 4.5 9.75 4.5s5.25 1.597 5.25 4.185c0 2.577-1.08 4.677-2.5 6.097Z" />
+                        </svg>
+                        <span>${sentence.tip_ar}</span>
+                    </div>
+                    ` : ''}
+                    <div class="sc-en">${sentence.en.replace(new RegExp(sentence.highlight.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&'), 'g'), `<span class="highlight">${sentence.highlight}</span>`)}</div>
+                    <div class="sc-ar">${sentence.ar}</div>
+                    <div class="sc-pronunciation">
+                        <div>${sentence.pronunciation_en || ''}</div>
+                        <div dir="rtl">${sentence.pronunciation_ar || ''}</div>
+                    </div>
+                `;
+                return card;
+            }
+            
+            function populateLessonScreen(levelKey, lessonKey) {
+                currentLevelKey = levelKey;
+                currentLessonKey = lessonKey;
+                initializeLessonProgress(lessonKey);
+
+                const lessonData = LESSON_LIBRARY[levelKey][lessonKey];
+                const lessonProgress = progress[lessonKey];
+                const repsNeeded = SRS_STAGES[lessonProgress.stage].reps;
+                const sentences = lessonData.sentences;
+                
+                document.getElementById('lesson-view-title').textContent = lessonData.title;
+                const listContainer = document.getElementById('lesson-sentence-list');
+                listContainer.innerHTML = '';
+                
+                let incompleteSentences = 0;
+                sentences.forEach(sentence => {
+                    const repsDone = lessonProgress.sentenceProgress[sentence.id] || 0;
+                    if (repsDone < repsNeeded) {
+                        incompleteSentences++;
+                    }
+                    const card = createSentenceCard(sentence, repsDone, repsNeeded);
+                    listContainer.appendChild(card);
+                });
+
+                const practiceBtn = document.getElementById('start-lesson-practice-btn');
+                const isLessonComplete = incompleteSentences === 0;
+
+                if (isLessonComplete) {
+                    if (lessonProgress.stage === 0) {
+                         if (progress[lessonKey].lastCompletion === null) {
+                            progress[lessonKey].stage = 1; // Graduate to stage 1
+                            progress[lessonKey].lastCompletion = new Date().toISOString();
+                            saveProgress();
+                         }
+                         practiceBtn.textContent = 'الدرس مكتمل! اذهب للمراجعة';
+                    } else {
+                         practiceBtn.textContent = 'تمت المراجعة!';
+                    }
+                    practiceBtn.disabled = true;
+                } else {
+                    practiceBtn.textContent = `ابدأ التمرين (${incompleteSentences} جمل متبقية)`;
+                    practiceBtn.disabled = false;
+                }
+            }
+
+            function populateReviewCenter() {
+                const container = document.getElementById('review-list-container');
+                container.innerHTML = '';
+                const sections = {};
+                
+                let activeLessonsForReview = [];
+
+                Object.keys(progress).forEach(lessonKey => {
+                    const status = getLessonStatus(lessonKey);
+                    if (status.status === 'learning') return;
+
+                    const stage = status.stage;
+                    if (!sections[stage]) {
+                        sections[stage] = document.createElement('div');
+                        sections[stage].className = 'review-stage-section';
+                        sections[stage].innerHTML = `<div class="review-stage-title">${SRS_STAGES[stage].name}</div>`;
+                    }
+                    
+                    const lessonCard = createReviewLessonCard(lessonKey, status);
+                    sections[stage].appendChild(lessonCard);
+
+                    if(status.status === 'active') {
+                        activeLessonsForReview.push(lessonKey);
+                    }
+                });
+
+                Object.keys(sections).sort().forEach(stageKey => container.appendChild(sections[stageKey]));
+                
+                const reviewBtn = document.getElementById('start-global-review-btn');
+                reviewBtn.disabled = activeLessonsForReview.length === 0;
+                reviewBtn.textContent = activeLessonsForReview.length > 0 ? `ابدأ المراجعة (${activeLessonsForReview.length} دروس)` : 'لا يوجد مراجعات متاحة';
+
+                if (document.querySelector('.review-lesson-countdown')) {
+                    countdownInterval = setInterval(updateAllCountdowns, 1000);
+                }
+            }
+
+            function createReviewLessonCard(lessonKey, status) {
+                const card = document.createElement('div');
+                card.className = 'review-lesson-card';
+                card.dataset.lessonKey = lessonKey;
+                card.dataset.srsStage = status.stage;
+
+                const icon = status.status === 'locked' 
+                    ? `<svg class="review-lesson-status-icon" style="stroke: var(--locked-color);" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 0 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25Z" /></svg>`
+                    : `<svg class="review-lesson-status-icon" style="stroke: var(--success-color);" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 10.5V6.75a4.5 4.5 0 1 1 9 0v3.75M3.75 21.75h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H3.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25Z" /></svg>`;
+
+                card.innerHTML = `
+                    <div class="review-lesson-card-header">
+                        <div class="review-lesson-title">${lessonKey}</div>
+                        ${icon}
+                    </div>
+                    ${status.status === 'locked' ? `<div class="review-lesson-countdown" data-due="${status.dueTimestamp}"></div>` : ''}
+                    <div class="review-lesson-sentences"></div>
+                `;
+                
+                if (status.status === 'locked') {
+                    card.classList.add('locked');
+                } else {
+                    card.addEventListener('click', () => {
+                        const sentencesContainer = card.querySelector('.review-lesson-sentences');
+                        const isVisible = sentencesContainer.style.display === 'block';
+                        if (isVisible) {
+                            sentencesContainer.style.display = 'none';
+                        } else {
+                            if (sentencesContainer.innerHTML === '') {
+                                const sentences = getLessonSentences(lessonKey);
+                                sentences.forEach(s => {
+                                    const sCard = createSentenceCard(s, '✓', '✓');
+                                    sentencesContainer.appendChild(sCard);
+                                });
+                            }
+                            sentencesContainer.style.display = 'block';
+                        }
+                    });
+                }
+                return card;
+            }
+
+            function updateAllCountdowns() {
+                document.querySelectorAll('.review-lesson-countdown').forEach(el => {
+                    const due = parseInt(el.dataset.due, 10);
+                    const now = new Date().getTime();
+                    const diff = due - now;
+
+                    if (diff <= 0) {
+                        el.textContent = 'جاهز للمراجعة!';
+                        if(!el.closest('.review-lesson-card').classList.contains('refreshed')) {
+                            el.closest('.review-lesson-card').classList.add('refreshed');
+                            populateReviewCenter();
+                        }
+                        return;
+                    }
+
+                    const d = Math.floor(diff / (1000 * 60 * 60 * 24));
+                    const h = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+                    const m = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+                    const s = Math.floor((diff % (1000 * 60)) / 1000);
+
+                    el.textContent = `يفتح بعد: ${d > 0 ? `${d}ي ` : ''}${h}س ${m}د ${s}ث`;
+                });
+            }
+
+            // --- Practice Flow ---
+            function startPracticeSession(isGlobal = false) {
+                practiceList = [];
+                let lessonsToPractice = isGlobal 
+                    ? Object.keys(progress).filter(lk => getLessonStatus(lk).status === 'active')
+                    : [currentLessonKey];
+                
+                lastPracticedLessonKey = lessonsToPractice.length > 0 ? lessonsToPractice[0] : null;
+
+                lessonsToPractice.forEach(lessonKey => {
+                    const lessonProgress = progress[lessonKey];
+                    const repsNeeded = SRS_STAGES[lessonProgress.stage].reps;
+                    const sentences = getLessonSentences(lessonKey);
+
+                    sentences.forEach(sentence => {
+                        const repsDone = lessonProgress.sentenceProgress[sentence.id] || 0;
+                        if (repsDone < repsNeeded) {
+                            for (let i = 0; i < (repsNeeded - repsDone); i++) {
+                                practiceList.push({ sentence, lessonKey });
+                            }
+                        }
+                    });
+                });
+
+                if (practiceList.length === 0) { return; }
+                
+                practiceList.sort(() => Math.random() - 0.5); // Shuffle
+                
+                currentPracticeItem = -1;
+                showScreen('practice', isGlobal ? 'reviewCenter' : 'lesson');
+                displayNextPracticeItem();
+            }
+
+            function displayNextPracticeItem() {
+                currentPracticeItem++;
+                if (currentPracticeItem >= practiceList.length) {
+                    setupWritingExercise();
+                    return;
+                }
+                
+                const { sentence } = practiceList[currentPracticeItem];
+                
+                document.getElementById('practice-context').textContent = sentence.context;
+                document.getElementById('practice-text-ar').textContent = sentence.ar;
+                document.getElementById('practice-text-en').innerHTML = sentence.en.replace(new RegExp(sentence.highlight.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&'), 'g'), `<span class="highlight">${sentence.highlight}</span>`);
+                document.getElementById('practice-pronunciation-en').textContent = sentence.pronunciation_en || '';
+                document.getElementById('practice-pronunciation-ar').textContent = sentence.pronunciation_ar || '';
+                
+                const tipContainer = document.getElementById('practice-tip-container');
+                if (sentence.tip_ar) {
+                    tipContainer.innerHTML = `
+                        <div class="sc-tip">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M12 18v-5.25m0 0a6.01 6.01 0 0 0 1.5-.189m-1.5.189a6.01 6.01 0 0 1-1.5-.189m3.75 7.478a12.06 12.06 0 0 1-4.5 0m3.75 2.311a7.5 7.5 0 0 1-7.5 0c-1.42-1.42-2.5-3.52-2.5-6.097C4.5 6.097 6.75 4.5 9.75 4.5s5.25 1.597 5.25 4.185c0 2.577-1.08 4.677-2.5 6.097Z" />
+                            </svg>
+                            <span>${sentence.tip_ar}</span>
+                        </div>`;
+                    tipContainer.style.display = 'block';
+                } else {
+                    tipContainer.style.display = 'none';
+                }
+
+                const { lessonKey } = practiceList[currentPracticeItem];
+                const repsDone = progress[lessonKey].sentenceProgress[sentence.id];
+                const repsNeeded = SRS_STAGES[progress[lessonKey].stage].reps;
+                document.getElementById('practice-counter').textContent = `${repsDone} / ${repsNeeded}`;
+
+                speakSentence(sentence.en);
+            }
+
+            function handlePracticeClick() {
+                if (currentPracticeItem >= practiceList.length || currentPracticeItem < 0) return;
+
+                document.getElementById('practice-banner').classList.add('clicked');
+                setTimeout(() => { document.getElementById('practice-banner').classList.remove('clicked'); }, 150);
+
+                const { sentence, lessonKey } = practiceList[currentPracticeItem];
+                
+                progress[lessonKey].sentenceProgress[sentence.id]++;
+                
+                const lessonSentences = getLessonSentences(lessonKey);
+                const lessonStage = progress[lessonKey].stage;
+                const repsNeeded = SRS_STAGES[lessonStage].reps;
+                const isLessonComplete = lessonSentences.every(s => progress[lessonKey].sentenceProgress[s.id] >= repsNeeded);
+
+                if (isLessonComplete) {
+                    progress[lessonKey].stage++;
+                    progress[lessonKey].lastCompletion = new Date().toISOString();
+                    lessonSentences.forEach(s => {
+                        progress[lessonKey].sentenceProgress[s.id] = 0;
+                    });
+                }
+                
+                saveProgress();
+                displayNextPracticeItem();
+            }
+            
+            function setupWritingExercise() {
+                const input = document.getElementById('writing-exercise-input');
+                const feedback = document.getElementById('writing-exercise-feedback');
+                input.value = '';
+                feedback.textContent = '';
+                input.disabled = false;
+                document.getElementById('writing-exercise-check-btn').disabled = false;
+                showScreen('writingExercise', 'practice');
+            }
+
+            // --- Event Listeners & Navigation ---
+            document.getElementById('go-to-level-selection-btn').addEventListener('click', () => {
+                const levelList = document.getElementById('level-list');
+                levelList.innerHTML = '';
+                Object.keys(LESSON_LIBRARY).forEach(levelKey => {
+                    const card = document.createElement('div');
+                    card.className = 'level-card'; card.textContent = levelKey; card.dataset.level = levelKey;
+                    levelList.appendChild(card);
+                });
+                showScreen('levelSelection', 'start');
+            });
+
+            document.getElementById('go-to-review-center-btn').addEventListener('click', () => showScreen('reviewCenter', 'start'));
+            document.getElementById('start-global-review-btn').addEventListener('click', () => startPracticeSession(true));
+            document.getElementById('start-lesson-practice-btn').addEventListener('click', () => startPracticeSession(false));
+            document.getElementById('practice-banner').addEventListener('click', handlePracticeClick);
+            document.getElementById('practice-speaker-icon').addEventListener('click', (e) => {
+                e.stopPropagation();
+                if (currentPracticeItem >= 0 && currentPracticeItem < practiceList.length) {
+                    speakSentence(practiceList[currentPracticeItem].sentence.en);
+                }
+            });
+
+            document.getElementById('level-list').addEventListener('click', (e) => {
+                const card = e.target.closest('.level-card');
+                if (card) {
+                    currentLevelKey = card.dataset.level;
+                    const lessonList = document.getElementById('lesson-list');
+                    lessonList.innerHTML = '';
+                    Object.keys(LESSON_LIBRARY[currentLevelKey]).forEach(lessonKey => {
+                        const lCard = document.createElement('div');
+                        lCard.className = 'lesson-card'; lCard.textContent = lessonKey; lCard.dataset.lesson = lessonKey;
+                        lessonList.appendChild(lCard);
+                    });
+                    showScreen('lessonSelection', 'levelSelection');
+                }
+            });
+
+            document.getElementById('lesson-list').addEventListener('click', (e) => {
+                const card = e.target.closest('.lesson-card');
+                if (card) {
+                    populateLessonScreen(currentLevelKey, card.dataset.lesson);
+                    showScreen('lesson', 'lessonSelection');
+                }
+            });
+            
+            document.getElementById('writing-exercise-check-btn').addEventListener('click', () => {
+                const input = document.getElementById('writing-exercise-input');
+                const feedback = document.getElementById('writing-exercise-feedback');
+                const userAnswer = input.value.trim().toLowerCase();
+                if (userAnswer === lastPracticedLessonKey) {
+                    feedback.textContent = 'صحيح! أحسنت.';
+                    feedback.className = 'feedback-correct';
+                    input.disabled = true;
+                    document.getElementById('writing-exercise-check-btn').disabled = true;
+                    setTimeout(() => showScreen('sessionComplete', 'writingExercise'), 1500);
+                } else {
+                    feedback.textContent = `حاول مرة أخرى. الإجابة الصحيحة هي: ${lastPracticedLessonKey}`;
+                    feedback.className = 'feedback-incorrect';
+                }
+            });
+
+            document.getElementById('writing-exercise-skip-btn').addEventListener('click', () => {
+                showScreen('sessionComplete', 'writingExercise');
+            });
+
+            // Back Buttons
+            document.getElementById('back-to-start-from-review').addEventListener('click', () => showScreen('start'));
+            document.getElementById('back-to-start-from-level-select').addEventListener('click', () => showScreen('start'));
+            document.getElementById('back-to-level-select-from-lesson').addEventListener('click', () => showScreen('levelSelection'));
+            document.getElementById('back-to-lesson-select-from-lesson-view').addEventListener('click', () => showScreen('lessonSelection'));
+            document.getElementById('back-to-previous-screen').addEventListener('click', () => showScreen(previousScreen));
+            document.getElementById('back-to-main-from-complete').addEventListener('click', () => showScreen('start'));
+            
+            // --- Initial Load ---
+            loadProgress();
+            loadVoices();
+            showScreen('start');
+        });
+    </script>
+</body>
+</html>
