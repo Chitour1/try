@@ -7,6 +7,8 @@ import android.graphics.Color;
 import android.media.projection.MediaProjectionManager;
 import android.net.Uri;
 import android.database.Cursor;
+import android.os.Environment;
+import android.provider.Settings;
 import android.provider.DocumentsContract;
 import android.provider.OpenableColumns;
 import java.nio.charset.StandardCharsets;
@@ -19,7 +21,7 @@ import android.widget.*;
 import java.io.*;
 import java.util.Locale;
 public class MainActivity extends Activity {
-  static final int PICK=101, CAPTURE=102, AUDIO=103, FOLDER=104;
+  static final int PICK=101, CAPTURE=102, AUDIO=103, FOLDER=104, STORAGE=105;
   LinearLayout controls;
   TextView status;
   EditText secs;
@@ -30,6 +32,7 @@ public class MainActivity extends Activity {
   MediaProjectionManager manager;
   Handler ui=new Handler(Looper.getMainLooper());
   int duration=60;
+  private boolean pendingLocalExplorer=false;
   @Override public void onCreate(Bundle b){super.onCreate(b);
     manager=(MediaProjectionManager)getSystemService(MEDIA_PROJECTION_SERVICE);
     getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
@@ -41,15 +44,15 @@ public class MainActivity extends Activity {
     controls.setPadding(p,p,p,p);
     TextView title=new TextView(this);title.setText("تحويل فلاش SWF إلى MP4");title.setTextColor(Color.WHITE);title.setTextSize(19);title.setGravity(Gravity.CENTER);
     controls.addView(title);
-    choose=new Button(this);choose.setText("١. اختيار SWF من الملفات (جميع الأنواع)");
+    choose=new Button(this);choose.setText("١. اختيار SWF (متصفح الملفات داخل التطبيق)");
     controls.addView(choose);
-    folder=new Button(this);folder.setText("إذا لم يظهر SWF: تصفح مجلد واختياره");controls.addView(folder);
+    folder=new Button(this);folder.setText("طريقة بديلة: نافذة الملفات في أندرويد");controls.addView(folder);
     secs=new EditText(this);secs.setHint("المدة بالثواني (تُحسب تلقائيًا)");secs.setSingleLine(true);secs.setInputType(2);secs.setTextColor(Color.WHITE);secs.setText("60");
     controls.addView(secs);
     export=new Button(this);export.setText("٢. تحويل إلى MP4");export.setEnabled(false);controls.addView(export);
     stop=new Button(this);stop.setText("إيقاف التسجيل");controls.addView(stop);
     status=new TextView(this);status.setText("اختر ملفًا من هاتفك. لا يحتاج التطبيق إلى الإنترنت.");status.setTextColor(Color.WHITE);status.setTextSize(14);controls.addView(status);
-    TextView help=new TextView(this);help.setText("يمكن أيضًا مشاركة ملف SWF من تطبيق «ملفاتي» مباشرةً إلى هذا التطبيق، حتى لو أخفاه منتقي ملفات أندرويد.");
+    TextView help=new TextView(this);help.setText("الخيار الأول يعرض الملفات بأسمائها الفعلية، لا وفق تصنيف سامسونغ. ويمكن مشاركة SWF من تطبيق «ملفاتي» إلى هذا التطبيق.");
     help.setTextColor(Color.rgb(207,219,228));help.setTextSize(12);controls.addView(help);
     root.addView(controls);
     web=new WebView(this);root.addView(web,new LinearLayout.LayoutParams(-1,0,1));
@@ -66,8 +69,8 @@ public class MainActivity extends Activity {
       @Override public WebResourceResponse shouldInterceptRequest(WebView v,WebResourceRequest r){return loader.shouldInterceptRequest(r.getUrl());}
       @Override public void onPageFinished(WebView v,String url){if(movie!=null)web.evaluateJavascript("initMovie()",null);}
     });
-    choose.setOnClickListener(v->openFilePicker());
-    folder.setOnClickListener(v->openFolderPicker());
+    choose.setOnClickListener(v->openLocalExplorer());
+    folder.setOnClickListener(v->openFilePicker());
     export.setOnClickListener(v->{if(loaded)beginCapture();});
     stop.setOnClickListener(v->finishCapture());
     handleIncomingFile(getIntent());
@@ -80,7 +83,8 @@ public class MainActivity extends Activity {
     if(checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED){requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO},AUDIO);return;}
     startActivityForResult(manager.createScreenCaptureIntent(),CAPTURE);
   }
-  @Override public void onRequestPermissionsResult(int r,String[] p,int[] grants){super.onRequestPermissionsResult(r,p,grants);if(r==AUDIO)startActivityForResult(manager.createScreenCaptureIntent(),CAPTURE);}
+  @Override public void onRequestPermissionsResult(int r,String[] p,int[] grants){super.onRequestPermissionsResult(r,p,grants);if(r==AUDIO)startActivityForResult(manager.createScreenCaptureIntent(),CAPTURE);
+    if(r==STORAGE && grants.length>0 && grants[0]==PackageManager.PERMISSION_GRANTED) showLocalDirectory(Environment.getExternalStorageDirectory());}
   @Override protected void onActivityResult(int r,int code,Intent data){super.onActivityResult(r,code,data);
     if(r==PICK && code==RESULT_OK && data!=null && data.getData()!=null){
       loadSwf(data.getData());
@@ -102,6 +106,101 @@ public class MainActivity extends Activity {
       ui.postDelayed(()->web.evaluateJavascript("playMovie()",null),1400);
       ui.postDelayed(()->finishCapture(),duration*1000L+1800);
     }
+  }
+
+  // This is manual browsing, NOT automatic scanning. Android's DocumentsUI
+  // may suppress unknown .swf MIME types under Samsung "Recent".
+  // The explorer opens one user-selected directory at a time, lists actual
+  // File names, and never searches the entire storage behind the user's back.
+  private void openLocalExplorer(){
+    if(Build.VERSION.SDK_INT>=30 && !Environment.isExternalStorageManager()){
+      new AlertDialog.Builder(this)
+        .setTitle("السماح بتصفح ملفات الهاتف")
+        .setMessage("يعرض التطبيق محتويات المجلد الذي تفتحه بنفسك، بما فيها ملفات SWF التي يخفيها قسم «الأحدث». يحتاج إذن «الوصول إلى جميع الملفات» للعرض المباشر فقط. لا يوجد بحث تلقائي ولا إرسال لأي ملف إلى الإنترنت.")
+        .setPositiveButton("السماح بالتصفح",(dialog,which)->{
+          pendingLocalExplorer=true;
+          try{
+            Intent settings=new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION);
+            settings.setData(Uri.parse("package:"+getPackageName()));
+            startActivity(settings);
+          }catch(Exception e){
+            try{startActivity(new Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION));}
+            catch(Exception ignored){pendingLocalExplorer=false;status.setText("تعذّر فتح أذونات الملفات، استعمل الطريقة البديلة.");}
+          }
+        })
+        .setNegativeButton("الطريقة البديلة",(dialog,which)->openFilePicker()).show();
+      return;
+    }
+    if(Build.VERSION.SDK_INT<30 &&
+        checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE)!=PackageManager.PERMISSION_GRANTED){
+      requestPermissions(new String[]{Manifest.permission.READ_EXTERNAL_STORAGE},STORAGE);
+      return;
+    }
+    showLocalDirectory(Environment.getExternalStorageDirectory());
+  }
+
+  @Override protected void onResume(){
+    super.onResume();
+    if(pendingLocalExplorer){
+      pendingLocalExplorer=false;
+      if(Build.VERSION.SDK_INT<30 || Environment.isExternalStorageManager())
+        showLocalDirectory(Environment.getExternalStorageDirectory());
+      else status.setText("لم يُمنح إذن تصفح الملفات. يمكنك استخدام الطريقة البديلة.");
+    }
+  }
+
+  // Keep browsing inside shared internal storage; no wildcard or MIME filter.
+  private void showLocalDirectory(File selected){
+    File root=Environment.getExternalStorageDirectory();
+    final String base, current;
+    try{
+      base=root.getCanonicalPath();
+      current=selected.getCanonicalPath();
+      if(!current.equals(base) && !current.startsWith(base+File.separator)){
+        status.setText("هذا المجلد خارج مساحة التخزين المتاحة.");return;
+      }
+    }catch(IOException e){status.setText("تعذّر فتح المجلد: "+e.getMessage());return;}
+    File[] entries=selected.listFiles();
+    if(entries==null){
+      status.setText("لا أستطيع قراءة هذا المجلد. جرّب التنزيلات أو الطريقة البديلة.");return;
+    }
+    // Show directories first, then SWF files, then all other file types.
+    // Non-SWF files are intentionally visible so the user can verify location.
+    Arrays.sort(entries,(left,right)->{
+      if(left.isDirectory()!=right.isDirectory())return left.isDirectory()?-1:1;
+      boolean a=left.getName().toLowerCase(Locale.ROOT).endsWith(".swf");
+      boolean b=right.getName().toLowerCase(Locale.ROOT).endsWith(".swf");
+      if(a!=b)return a?-1:1;
+      return left.getName().compareToIgnoreCase(right.getName());
+    });
+    int visible=Math.min(entries.length,2000);
+    boolean hasParent=!current.equals(base);
+    String[] names=new String[visible+(hasParent?1:0)];
+    if(hasParent)names[0]="⬆ العودة للمجلد السابق";
+    int swf=0;
+    for(int i=0;i<visible;i++){
+      File item=entries[i];
+      boolean flash=item.getName().toLowerCase(Locale.ROOT).endsWith(".swf");
+      if(flash)swf++;
+      names[i+(hasParent?1:0)]=(item.isDirectory()?"📁 ":flash?"🎞️ ":"📄 ")+item.getName();
+    }
+    String relative=current.equals(base)?"الذاكرة الداخلية":current.substring(base.length()+1);
+    status.setText("المجلد: "+relative+" | ملفات SWF الظاهرة: "+swf);
+    new AlertDialog.Builder(this)
+      .setTitle(relative+" — اختر ملف SWF")
+      .setItems(names,(dialog,index)->{
+        if(hasParent && index==0){showLocalDirectory(selected.getParentFile());return;}
+        File item=entries[index-(hasParent?1:0)];
+        if(item.isDirectory())showLocalDirectory(item);
+        else loadSwf(Uri.fromFile(item));
+      })
+      .setPositiveButton("التنزيلات",(dialog,which)->{
+        File downloads=Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
+        showLocalDirectory(downloads.isDirectory()?downloads:root);
+      })
+      .setNeutralButton("الرئيسية",(dialog,which)->showLocalDirectory(root))
+      .setNegativeButton("إغلاق",null)
+      .show();
   }
 
   // The system file picker can hide unknown .swf MIME types on some Samsung
