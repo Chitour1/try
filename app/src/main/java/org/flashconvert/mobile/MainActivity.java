@@ -6,6 +6,9 @@ import android.graphics.Color;
 import android.net.Uri;
 import android.os.*;
 import android.provider.MediaStore;
+import android.database.Cursor;
+import android.provider.OpenableColumns;
+import android.os.Environment;
 import android.view.*;
 import android.widget.*;
 import java.io.*;
@@ -19,6 +22,7 @@ public class MainActivity extends Activity {
   private Button choose,convert,cancel;
   private ProgressBar progress;
   private Uri selected;
+  private SwfFileChooser fileChooser;
   private String filename="flash";
   private boolean processing=false;
   private final AtomicBoolean cancelled=new AtomicBoolean(false);
@@ -33,10 +37,10 @@ public class MainActivity extends Activity {
     title.setText("محول SWF إلى MP4");title.setTextSize(25);title.setTextColor(Color.WHITE);
     title.setGravity(Gravity.CENTER);layout.addView(title);
     detail=new TextView(this);
-    detail.setText("تحويل داخلي حقيقي: بلا معاينة، بلا تسجيل شاشة، وبلا إنترنت.");
+    detail.setText("التحويل يجري داخل الهاتف، دون تسجيل الشاشة. اختَر ملف SWF من المجلدات مباشرة، وليس من قسم «الأحدث».");
     detail.setTextSize(15);detail.setTextColor(Color.rgb(214,226,239));detail.setPadding(0,dp(16),0,dp(18));
     layout.addView(detail);
-    choose=new Button(this);choose.setText("١. اختر ملف SWF");
+    choose=new Button(this);choose.setText("١. تصفّح الملفات واختيار SWF");
     layout.addView(choose);
     convert=new Button(this);convert.setText("٢. تحويل إلى MP4");convert.setEnabled(false);
     layout.addView(convert);
@@ -50,20 +54,15 @@ public class MainActivity extends Activity {
     cancel=new Button(this);cancel.setText("إلغاء التحويل");cancel.setEnabled(false);
     layout.addView(cancel);
     ScrollView scroll=new ScrollView(this);scroll.addView(layout);setContentView(scroll);
-    choose.setOnClickListener(v->pickFile());
+    fileChooser=new SwfFileChooser(this, this::setSource, msg->status.setText(msg));
+    choose.setOnClickListener(v->fileChooser.open());
     convert.setOnClickListener(v->startConversion());
     cancel.setOnClickListener(v->{cancelled.set(true);status.setText("جاري إلغاء التحويل...");});
     handleShare(getIntent());
   }
   private int dp(int n){return (int)(n*getResources().getDisplayMetrics().density);}
-  private void pickFile(){
-    Intent intent=new Intent(Intent.ACTION_OPEN_DOCUMENT);
-    intent.setType("*/*");
-    intent.addCategory(Intent.CATEGORY_OPENABLE);
-    intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-    // No MIME filter: vendors often categorize .swf as unknown or octet-stream.
-    startActivityForResult(intent,CHOOSE_SWF);
-  }
+  @Override protected void onResume(){super.onResume();if(fileChooser!=null)fileChooser.onResume();}
+  @Override public void onRequestPermissionsResult(int request,String[] permissions,int[] grants){super.onRequestPermissionsResult(request,permissions,grants);if(fileChooser!=null)fileChooser.onRequestPermissionsResult(request,grants);}
   private void handleShare(Intent intent){
     if(intent==null)return;
     Uri u=null;
@@ -76,17 +75,36 @@ public class MainActivity extends Activity {
   @Override protected void onNewIntent(Intent intent){super.onNewIntent(intent);setIntent(intent);handleShare(intent);}
   @Override protected void onActivityResult(int request,int result,Intent data){
     super.onActivityResult(request,result,data);
+    if(fileChooser!=null && fileChooser.onActivityResult(request,result,data))return;
     if(request==CHOOSE_SWF&&result==RESULT_OK&&data!=null&&data.getData()!=null)setSource(data.getData());
   }
   private void setSource(Uri uri){
-    if(processing)return;
-    selected=uri;
-    filename="flash";
-    try(android.database.Cursor c=getContentResolver().query(uri,new String[]{android.provider.OpenableColumns.DISPLAY_NAME},null,null,null)){
-      if(c!=null&&c.moveToFirst()){String s=c.getString(0);if(s!=null)filename=s;}
-    }catch(Exception ignored){}
-    convert.setEnabled(true);
-    status.setText("تم اختيار: "+filename+"\nجاهز للتحويل.");
+    if(processing||uri==null)return;
+    String name="flash";
+    try{
+      if("file".equals(uri.getScheme())&&uri.getPath()!=null){
+        name=new File(uri.getPath()).getName();
+      }else{
+        try(Cursor c=getContentResolver().query(uri,new String[]{OpenableColumns.DISPLAY_NAME},null,null,null)){
+          if(c!=null&&c.moveToFirst()&&c.getString(0)!=null)name=c.getString(0);
+        }
+      }
+      try(InputStream input=getContentResolver().openInputStream(uri)){
+        if(input==null)throw new IOException("الملف غير قابل للقراءة");
+        byte[] sig=new byte[3];
+        if(input.read(sig)!=3 ||
+          !((sig[0]=='F'||sig[0]=='C'||sig[0]=='Z')&&sig[1]=='W'&&sig[2]=='S')){
+          status.setText("هذا ليس ملف فلاش SWF صالحًا. اختر ملفًا بامتداد .swf");
+          Toast.makeText(this,"ملف غير صالح: يجب أن يكون SWF",Toast.LENGTH_LONG).show();
+          return;
+        }
+      }
+      selected=uri;filename=name;
+      convert.setEnabled(true);
+      status.setText("تم اختيار ملف SWF: "+filename+"\nجاهز للتحويل.");
+    }catch(Exception e){
+      status.setText("تعذّر قراءة ملف SWF: "+e.getMessage());
+    }
   }
   private void setProgress(String text,float ratio){
     ui.post(()->{
