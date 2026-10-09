@@ -1,0 +1,11 @@
+<!doctype html><html lang="ar"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><style>html,body{width:100%;height:100%;margin:0;overflow:hidden;background:#101013}#stage{height:100%;width:100%;display:flex;align-items:center;justify-content:center}ruffle-player{width:100%;height:100%}</style></head><body><div id="stage"></div><script>window.RufflePlayer=window.RufflePlayer||{};window.RufflePlayer.config={autoplay:"off",unmuteOverlay:"hidden",letterbox:"on",backgroundColor:"#ffffff",showSwfDownload:false};</script><script src="/assets/ruffle/ruffle.js"></script><script>
+let player=null;
+window.initMovie=async function(){try{
+  let r=window.RufflePlayer.newest();
+  player=r.createPlayer();document.getElementById("stage").replaceChildren(player);
+  await player.ruffle().load({url:"/files/movie.swf",allowScriptAccess:false,autoplay:"off"});
+  AndroidBridge.ready();
+}catch(e){AndroidBridge.error(String(e))}};
+window.playMovie=function(){try{player.ruffle().play()}catch(e){AndroidBridge.error(String(e))}};
+window.pauseMovie=function(){try{player.ruffle().pause()}catch(e){}};
+</script></body></html>

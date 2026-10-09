@@ -1,0 +1,36 @@
+name: Build SWF-to-MP4 Android APK
+on:
+  push:
+    branches: [swf-to-mp4-apk-20261009]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+      - name: Add offline Ruffle player
+        run: |
+          mkdir -p app/src/main/assets/ruffle
+          npm pack @ruffle-rs/ruffle@0.7.1 --pack-destination /tmp
+          tar -xzf /tmp/ruffle-rs-ruffle-0.7.1.tgz -C app/src/main/assets/ruffle --strip-components=1
+          ls -lh app/src/main/assets/ruffle
+          test -f app/src/main/assets/ruffle/ruffle.js
+          find app/src/main/assets/ruffle -name '*.wasm' | grep -q .
+      - name: Compile APK
+        run: gradle :app:assembleDebug --stacktrace --no-daemon
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SWF-to-MP4-APK
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
