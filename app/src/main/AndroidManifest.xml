@@ -8,6 +8,17 @@
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:mimeType="*/*"/>
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:mimeType="application/x-shockwave-flash"/>
+                <data android:scheme="content"/>
+            </intent-filter>
         </activity>
         <service android:name=".RecorderService" android:exported="false" android:foregroundServiceType="mediaProjection"/>
     </application>
