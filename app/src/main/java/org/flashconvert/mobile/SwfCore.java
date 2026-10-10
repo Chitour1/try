@@ -20,6 +20,8 @@ final class SwfCore {
     int width, height, frameCount, stageX, stageY;
     float fps;
     int audioSampleRate=11025, audioChannels=1;
+    int audioSeekSamples=0;
+    int audioBlockCount=0;
     byte[] mp3;
     int background=Color.WHITE;
     final HashMap<Integer,Shape> shapes=new HashMap<>();
@@ -340,7 +342,11 @@ final class SwfCore {
                 }
             }else if(t.type==19){
                 // SoundStreamBlock MP3 = samples UI16 + signed seek UI16 + MP3 payload
-                if(format==2&&t.bytes.length>4)sound.write(t.bytes,4,t.bytes.length-4);
+                if(format==2&&t.bytes.length>4){
+                    if(audioBlockCount==0) audioSeekSamples=(short)((t.bytes[2]&255)|((t.bytes[3]&255)<<8));
+                    audioBlockCount++;
+                    sound.write(t.bytes,4,t.bytes.length-4);
+                }
             }else if(t.type==14&&sound.size()==0){
                 if(t.bytes.length>10){
                     int info=t.bytes[2]&255;

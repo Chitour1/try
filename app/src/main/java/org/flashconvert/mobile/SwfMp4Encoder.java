@@ -134,6 +134,7 @@ final class SwfMp4Encoder {
       MediaCodec.BufferInfo di=new MediaCodec.BufferInfo(),ei=new MediaCodec.BufferInfo();
       ArrayDeque<AudioPacket> queue=new ArrayDeque<>();
       int audioTrack=-1,iterations=0;
+      boolean encoderEosQueued=false;
       while(!encodeDone){
         if(++iterations>300000)throw new IOException("Audio transcoding stalled");
         if(!sendEos){
@@ -164,7 +165,7 @@ final class SwfMp4Encoder {
             if(enc!=AudioFormat.ENCODING_PCM_16BIT)throw new IOException("Decoder PCM encoding unsupported: "+enc);
           }
         }
-        if(decodeDone&&queue.isEmpty()&&!sendEos){queue.add(new AudioPacket(new byte[0],0,true));}
+        // Decoder EOS is handled below; no duplicate empty audio packets.
         // Feed the AAC encoder without duplicating any PCM buffers.
         if(!queue.isEmpty()){
           AudioPacket packet=queue.peek();
@@ -178,11 +179,11 @@ final class SwfMp4Encoder {
             packet.offset+=n;
             if(packet.offset==packet.data.length)queue.remove();
           }
-        }else if(decodeDone){
+        }else if(decodeDone && !encoderEosQueued){
           int in=encoder.dequeueInputBuffer(3000);
           if(in>=0){
             encoder.queueInputBuffer(in,0,0,0,MediaCodec.BUFFER_FLAG_END_OF_STREAM);
-            decodeDone=false;
+            encoderEosQueued=true;
           }
         }
         while(true){

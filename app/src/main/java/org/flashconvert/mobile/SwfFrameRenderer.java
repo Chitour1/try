@@ -4,12 +4,14 @@ import java.util.*;
 final class SwfFrameRenderer {
  final SwfCore swf;
  final HashMap<Integer,Bitmap> cache=new HashMap<>();
- final HashMap<Integer,Display> displayCache=new HashMap<>();
+ final HashMap<String,Display> displayCache=new HashMap<>();
  final Display root=new Display();
  final Paint paint=new Paint(Paint.ANTI_ALIAS_FLAG|Paint.FILTER_BITMAP_FLAG);
  int last=-1;
  static final class ObjectAt {
   int id,born;
+  long instanceId;
+  final Display nested=new Display();
   float[] matrix={1,0,0,1,0,0},cx={1,1,1,1,0,0,0,0};
  }
  static final class Display {
@@ -63,6 +65,11 @@ final class SwfFrameRenderer {
   return path;
  }
  static long key(int x,int y){return ((long)x<<32)|(y&0xffffffffL);}
+ static Matrix fillMatrix(float[] m){
+   Matrix result=new Matrix();
+   result.setValues(new float[]{m[0]/20f,m[2]/20f,m[4]/20f,m[1]/20f,m[3]/20f,m[5]/20f,0,0,1});
+   return result;
+ }
  void applyStyle(Paint p,SwfCore.Style s){
   p.reset();p.setAntiAlias(true);p.setFilterBitmap(true);p.setStyle(Paint.Style.FILL);
   if(s.kind==0){p.setColor(s.color);return;}
@@ -70,15 +77,15 @@ final class SwfFrameRenderer {
    if(s.positions==null||s.positions.length<2){p.setColor(Color.BLACK);return;}
    Shader shader;
    Shader.TileMode mode=s.spread==1?Shader.TileMode.MIRROR:s.spread==2?Shader.TileMode.REPEAT:Shader.TileMode.CLAMP;
-   if(s.type==0x10)shader=new LinearGradient(-819.2f,0,819.2f,0,s.stops,s.positions,mode);
-   else shader=new RadialGradient(0,0,819.2f,s.stops,s.positions,mode);
-   if(s.matrix!=null){Matrix inv=new Matrix();if(matrix(s.matrix).invert(inv))shader.setLocalMatrix(matrix(s.matrix));}
+   if(s.type==0x10)shader=new LinearGradient(-16384f,0,16384f,0,s.stops,s.positions,mode);
+   else shader=new RadialGradient(0,0,16384f,s.stops,s.positions,mode);
+   if(s.matrix!=null){shader.setLocalMatrix(fillMatrix(s.matrix));}
    p.setShader(shader);return;
   }
   Bitmap bmp=swf.images.get(s.imageId);
   if(bmp==null){p.setColor(Color.TRANSPARENT);return;}
   BitmapShader shader=new BitmapShader(bmp,(s.type==0x40||s.type==0x42)?Shader.TileMode.REPEAT:Shader.TileMode.CLAMP,(s.type==0x40||s.type==0x42)?Shader.TileMode.REPEAT:Shader.TileMode.CLAMP);
-  if(s.matrix!=null)shader.setLocalMatrix(matrix(s.matrix));
+  if(s.matrix!=null)shader.setLocalMatrix(fillMatrix(s.matrix));
   p.setShader(shader);
  }
  void drawShape(Canvas c,SwfCore.Shape s,int alpha){
@@ -97,7 +104,7 @@ final class SwfFrameRenderer {
    c.drawPath(edges(e.getValue()),paint);
   }
  }
- void character(Canvas c,int id,int frame,int alpha,int depth){
+ void character(Canvas c,int id,int frame,int alpha,int depth,Display nested){
   if(depth>30)return;
   SwfCore.Shape shape=swf.shapes.get(id);
   if(shape!=null){drawShape(c,shape,alpha);return;}
@@ -121,9 +128,8 @@ final class SwfFrameRenderer {
   }
   SwfCore.Sprite sprite=swf.sprites.get(id);
   if(sprite!=null){
-   Display d=displayCache.computeIfAbsent(id,k->new Display());
-   at(d,sprite.frames,frame);
-   drawDisplay(c,d,frame,alpha,depth+1);
+   at(nested,sprite.frames,frame);
+   drawDisplay(c,nested,frame,alpha,depth+1);
   }
  }
  void drawDisplay(Canvas c,Display d,int frame,int parentAlpha,int depth){
@@ -131,7 +137,7 @@ final class SwfFrameRenderer {
    c.save();c.concat(matrix(o.matrix));
    int alpha=Math.max(0,Math.min(255,Math.round((o.cx[3]+o.cx[7]/255f)*parentAlpha)));
    int local=swf.sprites.containsKey(o.id)?Math.max(0,frame-o.born):0;
-   character(c,o.id,local,alpha,depth);
+   character(c,o.id,local,alpha,depth,o.nested);
    c.restore();
   }
  }
