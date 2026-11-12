@@ -222,3 +222,143 @@ change(
 change("app/build.gradle.kts", "versionCode = 105", "versionCode = 106")
 change("app/build.gradle.kts", 'versionName = "2.1.0"', 'versionName = "2.2.0"')
 print("Applied Akwam TV 2.2.0 playback diagnostics and ad stream filtering.")
+
+
+# v2.3: Accept legitimate Akwam navigation again. The 2.1 blanket denial of
+# window.open and every non-akwam top-level URL also rejected watch servers.
+# Use a short-lived relay to discover the URL, then require an explicit choice
+# before visiting unknown hosts. Known ad hosts are refused without a prompt.
+change(
+    chrome,
+    """        // Akwam TV kiosk mode: no popup can replace the visible movie page.
+        // Reject rather than opening an invisible ad in the background.
+        return false
+    }""",
+    """        val host = view ?: return false
+        return openInCurrentWindow(host, resultMsg)
+    }"""
+)
+change(
+    chrome,
+    "    private val launchExternal: (String) -> Unit = {}",
+    """    private val onPopupTarget: (String) -> Unit = {},
+    private val launchExternal: (String) -> Unit = {}"""
+)
+change(
+    chrome,
+    """        if (decision == ExternalSchemePolicy.Decision.LetWebViewLoad) host.loadUrl(url)
+        else launchExternal(url)""",
+    """        // Only the approved target is loaded in the visible WebView.
+        // Popup relay itself never gets to load an advertisement.
+        if (decision == ExternalSchemePolicy.Decision.LetWebViewLoad) onPopupTarget(url)
+        else launchExternal(url)"""
+)
+
+change(
+    client,
+    """    private val onNavigationBlocked: () -> Unit = {}""",
+    """    private val onNavigationBlocked: () -> Unit = {},
+    private val isTrustedExternalHost: (String) -> Boolean = { false },
+    private val onExternalPage: (String) -> Unit = {}"""
+)
+change(
+    client,
+    """        if (request.isForMainFrame && isUnexpectedExternalPage(view, url)) return true""",
+    """        if (request.isForMainFrame && isUnexpectedExternalPage(view, url)) {
+            onExternalPage(target)
+            return true
+        }"""
+)
+change(
+    client,
+    """        if (isUnexpectedExternalPage(view, uri)) return true""",
+    """        if (isUnexpectedExternalPage(view, uri)) {
+            onExternalPage(target)
+            return true
+        }"""
+)
+change(
+    client,
+    """        if (!isAkwam(from)) return false""",
+    """        if (!isAkwam(from) && !isTrustedExternalHost(from)) return false"""
+)
+change(
+    client,
+    """        if (isAkwam(to)) return false""",
+    """        if (isAkwam(to) || isTrustedExternalHost(to)) return false"""
+)
+change(
+    main,
+    """    private lateinit var handoff: HandoffController""",
+    """    private lateinit var handoff: HandoffController
+    private val trustedExternalHosts = mutableSetOf<String>()
+    private var linkChoiceShowing = false"""
+)
+change(
+    main,
+    """            onNavigationBlocked = { /* Keep the film page in place without an interruption. */ }""",
+    """            onNavigationBlocked = { /* Keep the film page in place without an interruption. */ },
+            isTrustedExternalHost = { host -> host in trustedExternalHosts },
+            onExternalPage = { url -> askAboutExternalLink(url) }"""
+)
+change(
+    main,
+    """            isBlockedPopup = { url -> adBlocker.isBlockedPopup(url) },
+            launchExternal = { url -> externalLinks.launch(url) }""",
+    """            isBlockedPopup = { url -> adBlocker.isBlockedPopup(url) },
+            onPopupTarget = { url -> askAboutExternalLink(url) },
+            launchExternal = { url -> externalLinks.launch(url) }"""
+)
+change(
+    main,
+    """    private fun openUrl(url: String) {""",
+    """    private fun askAboutExternalLink(url: String) {
+        val uri = Uri.parse(url)
+        val scheme = uri.scheme?.lowercase() ?: return
+        if (scheme != "http" && scheme != "https") return
+        val host = uri.host?.lowercase() ?: return
+        if (adBlocker.isBlockedPopup(url)) return
+        if (host == "akwam.ss" || host.endsWith(".akwam.ss") ||
+            host in trustedExternalHosts) {
+            webView.loadUrl(url)
+            return
+        }
+        // External video hosts may be necessary, but unsolicited ad redirects
+        // must not replace the visible film page without the viewer's consent.
+        if (linkChoiceShowing) return
+        linkChoiceShowing = true
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("رابط مشاهدة خارجي")
+            .setMessage("يريد الموقع فتح خادم خارجي: " + host +
+                "\\nقد يكون مشغل فيلم أو إعلانًا. هل تريد فتحه؟")
+            .setNegativeButton("حظر الرابط", null)
+            .setPositiveButton("فتح الرابط") { _, _ ->
+                trustedExternalHosts.add(host)
+                webView.loadUrl(url)
+            }
+            .create()
+        dialog.setOnDismissListener { linkChoiceShowing = false }
+        dialog.show()
+    }
+
+    private fun openUrl(url: String) {"""
+)
+
+# The site works on the user's phone but can serve different playback APIs to
+# TV WebView. Provide a Chrome/Android mobile user-agent (actual Chromium
+# version preserved) for its first-party/embedded web player as a fallback.
+change(
+    main,
+    """            mediaPlaybackRequiresUserGesture = false
+            // Route window.open""",
+    """            mediaPlaybackRequiresUserGesture = false
+            val chromiumVersion = Regex("Chrome/([0-9.]+)")
+                .find(userAgentString)?.groupValues?.get(1) ?: "120.0.0.0"
+            userAgentString = "Mozilla/5.0 (Linux; Android 13; Pixel 7) " +
+                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/" +
+                chromiumVersion + " Mobile Safari/537.36"
+            // Route window.open"""
+)
+change("app/build.gradle.kts", "versionCode = 106", "versionCode = 107")
+change("app/build.gradle.kts", 'versionName = "2.2.0"', 'versionName = "2.3.0"')
+print("Applied Akwam TV 2.3.0: user-approved watch links, mobile UA, no ad windows.")
