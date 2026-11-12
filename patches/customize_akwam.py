@@ -516,3 +516,118 @@ change(
 change("app/build.gradle.kts", "versionCode = 108", "versionCode = 109")
 change("app/build.gradle.kts", 'versionName = "2.4.0"', 'versionName = "2.5.0"')
 print("Applied Akwam TV 2.5: targeted HTTP/2-capable OkHttp transport for downet.net and deeper error diagnostics.")
+
+
+# v2.6: The user wants no ad blocking at all. Both normal ads and genuine
+# video dependencies must load. Every new-window navigation is hosted in a
+# separate invisible WebView, never replacing the visible movie page. Each
+# temporary window has a strict memory/time limit and is destroyed on exit.
+change(
+    main,
+    """            blockAds = { settings.get().blockAds },
+            blockPopups = { settings.get().blockPopups },""",
+    """            blockAds = { false },
+            blockPopups = { false },"""
+)
+change(
+    chrome,
+    """        // Reject any new browsing window, never redirect it to the current page.
+        // Do not create relay WebViews, overlays, tabs or alerts.
+        return false
+    }""",
+    """        return createHiddenPopup(view, resultMsg)
+    }"""
+)
+change(
+    chrome,
+    """    private val mainHandler = Handler(Looper.getMainLooper())""",
+    """    private val mainHandler = Handler(Looper.getMainLooper())
+    private val hiddenWindows = LinkedHashSet<WebView>()
+    private val hiddenTimers = mutableMapOf<WebView, Runnable>()
+    private val maxHiddenWindows = 8
+    private val hiddenWindowLifetimeMs = 30_000L
+
+    private fun createHiddenPopup(source: WebView?, resultMsg: Message?): Boolean {
+        val host = source ?: return false
+        val transport = resultMsg?.obj as? WebView.WebViewTransport ?: return false
+        // Bound allocation and lifetime so ad scripts cannot exhaust TV memory.
+        if (hiddenWindows.size >= maxHiddenWindows) {
+            closeHiddenWindow(hiddenWindows.first())
+        }
+        val hidden = WebView(host.context)
+        hidden.setBackgroundColor(android.graphics.Color.TRANSPARENT)
+        hidden.alpha = 0f
+        hidden.translationX = -10000f
+        hidden.isFocusable = false
+        hidden.isFocusableInTouchMode = false
+        hidden.isClickable = false
+        hidden.settings.apply {
+            javaScriptEnabled = true
+            domStorageEnabled = true
+            setSupportMultipleWindows(true)
+            javaScriptCanOpenWindowsAutomatically = true
+            allowFileAccess = false
+            allowContentAccess = false
+            allowFileAccessFromFileURLs = false
+            allowUniversalAccessFromFileURLs = false
+        }
+        android.webkit.CookieManager.getInstance().setAcceptThirdPartyCookies(hidden, true)
+        hidden.webViewClient = object : WebViewClient() {}
+        hidden.webChromeClient = object : WebChromeClient() {
+            override fun onCreateWindow(
+                view: WebView?,
+                isDialog: Boolean,
+                isUserGesture: Boolean,
+                resultMsg: Message?
+            ): Boolean = createHiddenPopup(view, resultMsg)
+            override fun onCloseWindow(window: WebView?) {
+                if (window != null) closeHiddenWindow(window)
+            }
+        }
+        hiddenWindows.add(hidden)
+        container.addView(hidden, ViewGroup.LayoutParams(2, 2))
+        val timeout = Runnable { closeHiddenWindow(hidden) }
+        hiddenTimers[hidden] = timeout
+        mainHandler.postDelayed(timeout, hiddenWindowLifetimeMs)
+        transport.webView = hidden
+        resultMsg.sendToTarget()
+        return true
+    }
+
+    private fun closeHiddenWindow(hidden: WebView) {
+        if (!hiddenWindows.remove(hidden)) return
+        hiddenTimers.remove(hidden)?.let { mainHandler.removeCallbacks(it) }
+        hidden.stopLoading()
+        hidden.loadUrl("about:blank")
+        hidden.clearHistory()
+        (hidden.parent as? ViewGroup)?.removeView(hidden)
+        hidden.destroy()
+    }
+
+    fun closeAllHiddenWindows() {
+        hiddenWindows.toList().forEach(::closeHiddenWindow)
+    }"""
+)
+change(
+    main,
+    """            javaScriptCanOpenWindowsAutomatically = false
+            loadWithOverviewMode = true""",
+    """            javaScriptCanOpenWindowsAutomatically = true
+            loadWithOverviewMode = true"""
+)
+change(
+    main,
+    """    override fun onDestroy() {
+        // Fully dispose the only active WebView""",
+    """    override fun onStop() {
+        if (::chromeClient.isInitialized) chromeClient.closeAllHiddenWindows()
+        super.onStop()
+    }
+
+    override fun onDestroy() {
+        if (::chromeClient.isInitialized) chromeClient.closeAllHiddenWindows()
+        // Fully dispose the only active WebView"""
+)
+change("app/build.gradle.kts", "versionCode = 109", "versionCode = 110")
+change("app/build.gradle.kts", 'versionName = "2.5.0"', 'versionName = "2.6.0"')
+print("Akwam TV 2.6: all web requests allowed; popups loaded invisibly and disposed safely.")
