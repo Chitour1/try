@@ -729,3 +729,20 @@ gradle_file.write_text(gradle_source)
 change("app/build.gradle.kts", "versionCode = 110", "versionCode = 111")
 change("app/build.gradle.kts", 'versionName = "2.6.0"', 'versionName = "2.7.0"')
 print("Akwam TV 2.7: no native player, no handoff, only embedded website HTML5 video.")
+
+
+# Complete web-only build cleanup: remove orphan ExoPlayer view and controller
+# and stale import which previously kept Kotlin/resource compilation failing.
+main_path = base / main
+main_text = main_path.read_text()
+main_text = main_text.replace("import net.mrowser.handoff.HandoffController\n", "")
+main_path.write_text(main_text)
+for obsolete in [
+    "app/src/main/kotlin/net/mrowser/player/SubtitleSyncController.kt",
+    "app/src/main/res/layout/player_activity.xml",
+]:
+    candidate = base / obsolete
+    if not candidate.exists():
+        raise RuntimeError("Expected obsolete player asset not found: "+obsolete)
+    candidate.unlink()
+print("Removed remaining native-player-only components.")
