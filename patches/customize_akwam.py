@@ -882,3 +882,99 @@ change(
 change("app/build.gradle.kts", "versionCode = 111", "versionCode = 112")
 change("app/build.gradle.kts", 'versionName = "2.7.0"', 'versionName = "2.8.0"')
 print("Akwam TV 2.8: handle VLC/MX links from page and hidden popup, preserve site-only web playback.")
+
+
+# v2.9: Present the actual browsing WebViews as mobile Android Chrome:
+# classic User-Agent + modern UA Client Hints, consistently for the visible
+# site and for invisible new windows. No fake video decoder, no TLS bypass.
+identity_file = base / "app/src/main/kotlin/net/mrowser/web/MobileBrowserIdentity.kt"
+identity_file.write_text("""package net.mrowser.web
+
+import android.webkit.WebView
+import androidx.webkit.UserAgentMetadata
+import androidx.webkit.WebSettingsCompat
+import androidx.webkit.WebViewFeature
+
+/**
+ * Identify this TV's WebView as the mobile version of the *same installed*
+ * Chromium engine. This chooses a phone-compatible site layout/stream where
+ * the site uses device detection; it cannot magically add missing codecs.
+ */
+object MobileBrowserIdentity {
+    fun apply(web: WebView) {
+        val settings = web.settings
+        val detected = Regex("Chrome/([0-9]+(?:\\\\.[0-9]+)*)")
+            .find(settings.userAgentString)
+            ?.groupValues?.getOrNull(1) ?: "125.0.0.0"
+        val version = (detected.split(".") + List(4) { "0" })
+            .take(4).joinToString(".")
+        val major = version.substringBefore(".")
+        settings.userAgentString = "Mozilla/5.0 (Linux; Android 14; Pixel 7) " +
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/" +
+            version + " Mobile Safari/537.36"
+
+        // Android WebView 116+ can reveal itself in Sec-CH-UA headers even
+        // when the legacy User-Agent was customized. Override metadata too.
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.USER_AGENT_METADATA)) {
+            val chrome = UserAgentMetadata.BrandVersion.Builder()
+                .setBrand("Google Chrome")
+                .setMajorVersion(major)
+                .setFullVersion(version)
+                .build()
+            val chromium = UserAgentMetadata.BrandVersion.Builder()
+                .setBrand("Chromium")
+                .setMajorVersion(major)
+                .setFullVersion(version)
+                .build()
+            val metadata = UserAgentMetadata.Builder()
+                .setMobile(true)
+                .setPlatform("Android")
+                .setPlatformVersion("14.0.0")
+                .setModel("Pixel 7")
+                .setFullVersion(version)
+                .setBrandVersionList(listOf(chrome, chromium))
+                .build()
+            try {
+                WebSettingsCompat.setUserAgentMetadata(settings, metadata)
+            } catch (_: UnsupportedOperationException) {
+                // Older TV WebView providers can still use the legacy header.
+            }
+        }
+    }
+}
+""")
+# Set mobile identity before the user visits either Akwam version.
+change(
+    main,
+    """        chrome = ChromeController(bar, urlInput, webView)""",
+    """        net.mrowser.web.MobileBrowserIdentity.apply(webView)
+        chrome = ChromeController(bar, urlInput, webView)"""
+)
+# A nested popup may serve an authentication/video handoff. It should report
+# the same mobile identity, without ever becoming visible or stealing focus.
+change(
+    chrome,
+    """        hiddenWindows.add(hidden)
+        container.addView(hidden, ViewGroup.LayoutParams(2, 2))""",
+    """        net.mrowser.web.MobileBrowserIdentity.apply(hidden)
+        hiddenWindows.add(hidden)
+        container.addView(hidden, ViewGroup.LayoutParams(2, 2))"""
+)
+# AndroidX WebKit provides stable User-Agent metadata APIs with a guarded
+# feature check for TV devices with older WebView components.
+with (base / "app/build.gradle.kts").open("a") as build_file:
+    build_file.write(
+        "\\n" if False else "\n"
+    )
+gradle_p = base / "app/build.gradle.kts"
+gradle_c = gradle_p.read_text()
+assert "dependencies {" in gradle_c
+gradle_c = gradle_c.replace(
+    "dependencies {",
+    'dependencies {\n    implementation("androidx.webkit:webkit:1.14.0")',
+    1
+)
+gradle_p.write_text(gradle_c)
+change("app/build.gradle.kts", "versionCode = 112", "versionCode = 113")
+change("app/build.gradle.kts", 'versionName = "2.8.0"', 'versionName = "2.9.0"')
+print("Akwam TV 2.9: consistent phone User-Agent and UA Client Hints on visible and hidden WebViews.")
