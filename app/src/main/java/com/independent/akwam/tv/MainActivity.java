@@ -1,6 +1,23 @@
 package com.independent.akwam.tv;
 
 import android.app.Activity;
+import android.os.Handler;
+import android.os.Looper;
+import android.util.Log;
+import android.webkit.JavascriptInterface;
+import android.webkit.ConsoleMessage;
+import android.media.AudioManager;
+import androidx.media3.common.MediaItem;
+import androidx.media3.common.MimeTypes;
+import androidx.media3.common.PlaybackException;
+import androidx.media3.common.Player;
+import androidx.media3.common.util.UnstableApi;
+import androidx.media3.exoplayer.ExoPlayer;
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory;
+import androidx.media3.datasource.DefaultHttpDataSource;
+import androidx.media3.ui.PlayerView;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import android.annotation.SuppressLint;
 import android.graphics.Canvas;
 import android.graphics.Color;
@@ -36,6 +53,7 @@ import java.util.HashSet;
 import java.util.Set;
 
 /* Independent, unofficial TV-friendly WebView browser. No films are bundled. */
+@UnstableApi
 public final class MainActivity extends Activity {
     private static final String NEW_URL = "https://akwam.ss/";
     private static final String OLD_URL = "https://old.akwam.ss/";
@@ -59,6 +77,13 @@ public final class MainActivity extends Activity {
     private boolean pointerOn = false;
     private boolean toolbarOn = true;
     private int blocked = 0;
+    private volatile String lastMediaUrl = "";
+    private volatile String lastMediaReferer = "";
+    private FrameLayout playerOverlay;
+    private ExoPlayer nativePlayer;
+    private PlayerView nativePlayerView;
+    private boolean videoOpen = false;
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
     private int dp(float n) { return (int)(n * getResources().getDisplayMetrics().density + .5f); }
 
@@ -111,6 +136,8 @@ public final class MainActivity extends Activity {
         pointerButton = addButton("المؤشر", () -> setMode(true));
         addButton("رجوع بالموقع", () -> { if (web.canGoBack()) web.goBack(); web.requestFocus(); });
         addButton("تقدم", () -> { if (web.canGoForward()) web.goForward(); web.requestFocus(); });
+        addButton("▶ تشغيل الفيديو", this::tryPlayVideo);
+        addButton("إعادة محاولة الفيديو", this::retryWebVideo);
         addButton("أسفل الصفحة ↓", () -> scrollPage(1));
         addButton("أعلى الصفحة ↑", () -> scrollPage(-1));
         addButton("تحديث", () -> {web.reload();web.requestFocus();});
@@ -137,6 +164,14 @@ public final class MainActivity extends Activity {
         browserArea = new FrameLayout(this);
         root.addView(browserArea,new LinearLayout.LayoutParams(-1,0,1));
         web = new WebView(this);
+        web.addJavascriptInterface(new Object() {
+            @JavascriptInterface public void capture(String url, String page) {
+                if (isMediaCandidate(url)) {
+                    lastMediaUrl = url;
+                    if (page != null && page.startsWith("https://")) lastMediaReferer = page;
+                }
+            }
+        }, "AkwamNative");
         web.setBackgroundColor(0xff0b1625);
         web.setFocusableInTouchMode(true);
         browserArea.addView(web,new FrameLayout.LayoutParams(-1,-1));
@@ -184,6 +219,117 @@ public final class MainActivity extends Activity {
         web.evaluateJavascript(script, null);
     }
 
+    private boolean isMediaCandidate(String url) {
+        if (url == null || !url.startsWith("https://") || url.length() > 4096) return false;
+        String u = url.toLowerCase(java.util.Locale.ROOT);
+        return u.matches(".*\\\\.(m3u8|mp4|mpd|m4v|webm)(\\\\?.*)?$") ||
+            u.matches(".*/(playlist|master|manifest)(\\\\?.*)?$");
+    }
+
+    private void scanVideoElements() {
+        // Playable URLs inside cross-origin iframes may be unavailable; network interception is a fallback.
+        String script = "(function(){try{var a=document.querySelectorAll('video,source');" +
+            "a.forEach(function(v){var s=v.currentSrc||v.src||v.getAttribute('src')||'';" +
+            "if(s&&s.startsWith('https://'))AkwamNative.capture(s,location.href)});" +
+            "document.querySelectorAll('iframe').forEach(function(v){" +
+            "var s=v.src||'';if(/\\\\.(m3u8|mp4|mpd)(\\\\?|$)/i.test(s))AkwamNative.capture(s,location.href)" +
+            "});}catch(e){}})();";
+        if (web != null) web.evaluateJavascript(script, null);
+    }
+
+    private void retryWebVideo() {
+        String script = "(function(){try{var a=document.querySelectorAll('video');" +
+            "a.forEach(function(v){v.muted=false;v.play().catch(function(e){});" +
+            "var s=v.currentSrc||v.src;if(s&&s.startsWith('https://'))AkwamNative.capture(s,location.href)});" +
+            "}catch(e){}})();";
+        web.evaluateJavascript(script, null);
+        web.requestFocus();
+        Toast.makeText(this, "حاولت إعادة تشغيل مشغل الصفحة؛ إذا بقي عند 00:00 جرب زر تشغيل الفيديو", Toast.LENGTH_LONG).show();
+    }
+
+    private void tryPlayVideo() {
+        scanVideoElements();
+        mainHandler.postDelayed(() -> {
+            if (!isMediaCandidate(lastMediaUrl)) {
+                new android.app.AlertDialog.Builder(this)
+                    .setTitle("رابط الفيديو غير متاح")
+                    .setMessage("لم يعثر التطبيق على رابط بث مباشر. اضغط تشغيل داخل موقع الفيلم أولًا ثم اختر «تشغيل الفيديو» مجددًا. بعض مشغلات المواقع تخفي رابط الفيديو ولا تسمح بفتحه خارجيًا.")
+                    .setPositiveButton("حسنًا", (d,w)->web.requestFocus()).show();
+                return;
+            }
+            startNativePlayer(lastMediaUrl);
+        }, 350);
+    }
+
+    private void startNativePlayer(String url) {
+        if (!isMediaCandidate(url)) return;
+        closeNativePlayer();
+        playerOverlay = new FrameLayout(this);
+        playerOverlay.setBackgroundColor(Color.BLACK);
+        nativePlayerView = new PlayerView(this);
+        nativePlayerView.setUseController(true);
+        nativePlayerView.setShowBuffering(PlayerView.SHOW_BUFFERING_ALWAYS);
+        playerOverlay.addView(nativePlayerView,
+            new FrameLayout.LayoutParams(-1,-1));
+        Button close = new Button(this);
+        close.setText("✕ إغلاق الفيديو");
+        close.setTextColor(Color.WHITE);
+        close.setAllCaps(false);
+        close.setBackgroundTintList(android.content.res.ColorStateList.valueOf(0xff263b52));
+        FrameLayout.LayoutParams cp = new FrameLayout.LayoutParams(dp(175),dp(52),Gravity.TOP|Gravity.RIGHT);
+        cp.setMargins(dp(12),dp(12),dp(12),dp(12));
+        playerOverlay.addView(close,cp);
+        close.setOnClickListener(v -> closeNativePlayer());
+        ((ViewGroup)findViewById(android.R.id.content)).addView(playerOverlay,
+            new ViewGroup.LayoutParams(-1,-1));
+        videoOpen = true;
+        try {
+            Map<String,String> headers = new LinkedHashMap<>();
+            String referer = lastMediaReferer;
+            if (referer == null || !referer.startsWith("https://"))
+                referer = web.getUrl();
+            if (referer != null && referer.startsWith("https://")) headers.put("Referer",referer);
+            String cookie = CookieManager.getInstance().getCookie(url);
+            if (cookie != null && !cookie.isEmpty()) headers.put("Cookie",cookie);
+            DefaultHttpDataSource.Factory http = new DefaultHttpDataSource.Factory()
+                .setUserAgent(web.getSettings().getUserAgentString())
+                .setAllowCrossProtocolRedirects(true)
+                .setDefaultRequestProperties(headers);
+            nativePlayer = new ExoPlayer.Builder(this)
+                .setMediaSourceFactory(new DefaultMediaSourceFactory(http)).build();
+            nativePlayerView.setPlayer(nativePlayer);
+            nativePlayer.addListener(new Player.Listener() {
+                @Override public void onPlayerError(PlaybackException e) {
+                    runOnUiThread(() -> new android.app.AlertDialog.Builder(MainActivity.this)
+                        .setTitle("تعذر تشغيل هذا المصدر")
+                        .setMessage("قد يكون رابط الفيلم محميًا أو غير متوافق أو انتهت صلاحيته. جرّب مشغلًا آخر داخل الصفحة أو عطّل حجب الإعلانات مؤقتًا.\nرمز الخطأ: "+e.errorCode)
+                        .setPositiveButton("عودة", (d,w)->closeNativePlayer()).show());
+                }
+            });
+            MediaItem.Builder item = new MediaItem.Builder().setUri(url);
+            String lower = url.toLowerCase(java.util.Locale.ROOT);
+            if (lower.contains(".m3u8") || lower.contains("/playlist")) item.setMimeType(MimeTypes.APPLICATION_M3U8);
+            else if (lower.contains(".mpd") || lower.contains("/manifest")) item.setMimeType(MimeTypes.APPLICATION_MPD);
+            nativePlayer.setMediaItem(item.build());
+            nativePlayer.prepare();
+            nativePlayer.setPlayWhenReady(true);
+            close.requestFocus();
+        } catch (Exception ex) {
+            Log.e("AkwamTV", "Native video error", ex);
+            Toast.makeText(this,"تعذر فتح مشغل الفيديو",Toast.LENGTH_LONG).show();
+            closeNativePlayer();
+        }
+    }
+    private void closeNativePlayer() {
+        if (nativePlayer != null) {nativePlayer.release(); nativePlayer=null;}
+        if (playerOverlay != null) {
+            ((ViewGroup)findViewById(android.R.id.content)).removeView(playerOverlay);
+            playerOverlay=null;
+        }
+        videoOpen=false;
+        if (web != null) web.requestFocus();
+    }
+
     private boolean isAdvertisement(String host) {
         if (host == null) return false;
         String h = host.toLowerCase(java.util.Locale.ROOT);
@@ -217,7 +363,7 @@ public final class MainActivity extends Activity {
         s.setLoadWithOverviewMode(true);
         s.setBuiltInZoomControls(true);
         s.setDisplayZoomControls(false);
-        s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
+        s.setMixedContentMode(WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE);
         CookieManager.getInstance().setAcceptCookie(true);
         CookieManager.getInstance().setAcceptThirdPartyCookies(web, true);
         web.setWebViewClient(new WebViewClient() {
@@ -228,6 +374,12 @@ public final class MainActivity extends Activity {
                 return false;
             }
             @Override public WebResourceResponse shouldInterceptRequest(WebView v, WebResourceRequest r) {
+                String url = r.getUrl().toString();
+                if (isMediaCandidate(url) && !isAdvertisement(r.getUrl().getHost())) {
+                    lastMediaUrl = url;
+                    String ref = r.getRequestHeaders().get("Referer");
+                    if (ref != null && ref.startsWith("https://")) lastMediaReferer = ref;
+                }
                 if (blockAds && isAdvertisement(r.getUrl().getHost())) {
                     blocked++;
                     return new WebResourceResponse("text/plain","utf-8",new ByteArrayInputStream(new byte[0]));
@@ -238,6 +390,7 @@ public final class MainActivity extends Activity {
                 final String label = url.contains("old.akwam") ? "القديم" : "الجديد";
                 runOnUiThread(() -> updateStatus());
                 if (blockAds) cleanPage();
+                scanVideoElements();
             }
             @Override public void onReceivedSslError(WebView v, SslErrorHandler handler, SslError error) {
                 handler.cancel();
@@ -263,6 +416,8 @@ public final class MainActivity extends Activity {
             Toast.makeText(this,"التطبيق مخصص للتصفح وتشغيل الفيديو، ولا يتضمن التحميل",Toast.LENGTH_LONG).show());
     }
     private void load(String url) {
+        lastMediaUrl = "";
+        lastMediaReferer = "";
         getPreferences(MODE_PRIVATE).edit().putString("site",url.equals(OLD_URL)?"old":"new").apply();
         blocked=0;web.loadUrl(url);web.requestFocus();
     }
@@ -277,6 +432,10 @@ public final class MainActivity extends Activity {
         if (controls.getChildCount()>0) controls.getChildAt(0).requestFocus();
     }
     @Override public boolean dispatchKeyEvent(KeyEvent e) {
+        if (videoOpen && e.getKeyCode()==KeyEvent.KEYCODE_BACK && e.getAction()==KeyEvent.ACTION_DOWN) {
+            closeNativePlayer();return true;
+        }
+        if (videoOpen) return super.dispatchKeyEvent(e);
         if (fullscreenVideo != null && e.getAction()==KeyEvent.ACTION_DOWN && e.getKeyCode()==KeyEvent.KEYCODE_BACK) {
             closeVideo();return true;
         }
@@ -324,6 +483,7 @@ public final class MainActivity extends Activity {
         return super.dispatchKeyEvent(e);
     }
     @Override public void onBackPressed() {
+        if (videoOpen) {closeNativePlayer();return;}
         if (fullscreenVideo != null) { closeVideo(); return; }
         if (web != null && web.hasFocus()) {
             if (pointerOn) { setMode(false); return; }
@@ -340,6 +500,7 @@ public final class MainActivity extends Activity {
         web.requestFocus();
     }
     @Override protected void onDestroy(){
+        closeNativePlayer();
         if(fullscreenVideo!=null)closeVideo();
         if(web!=null){web.stopLoading();web.destroy();}
         super.onDestroy();
