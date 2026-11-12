@@ -52,11 +52,11 @@ public final class MainActivity extends Activity {
     private TextView status;
     private WebView web;
     private Pointer pointer;
-    private Button adButton, pointerButton;
+    private Button adButton, pointerButton, scrollButton;
     private View fullscreenVideo;
     private WebChromeClient.CustomViewCallback fullscreenCallback;
     private boolean blockAds = true;
-    private boolean pointerOn = true;
+    private boolean pointerOn = false;
     private boolean toolbarOn = true;
     private int blocked = 0;
 
@@ -67,7 +67,8 @@ public final class MainActivity extends Activity {
         getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN,
             WindowManager.LayoutParams.FLAG_FULLSCREEN);
         blockAds = getPreferences(MODE_PRIVATE).getBoolean("ads", true);
-        pointerOn = getPreferences(MODE_PRIVATE).getBoolean("pointer", true);
+        pointerOn = false;
+        getPreferences(MODE_PRIVATE).edit().putBoolean("pointer", false).apply();
         makeUI();
         setupWeb();
         String last = getPreferences(MODE_PRIVATE).getString("site","new");
@@ -106,24 +107,22 @@ public final class MainActivity extends Activity {
         controlScroll.addView(controls);
         addButton("أكوام الجديد", () -> load(NEW_URL));
         addButton("أكوام القديم", () -> load(OLD_URL));
-        addButton("رجوع", () -> { if (web.canGoBack()) web.goBack(); });
-        addButton("تقدم", () -> { if (web.canGoForward()) web.goForward(); });
-        addButton("تحديث", () -> web.reload());
+        scrollButton = addButton("التمرير ✓", () -> setMode(false));
+        pointerButton = addButton("المؤشر", () -> setMode(true));
+        addButton("رجوع بالموقع", () -> { if (web.canGoBack()) web.goBack(); web.requestFocus(); });
+        addButton("تقدم", () -> { if (web.canGoForward()) web.goForward(); web.requestFocus(); });
+        addButton("أسفل الصفحة ↓", () -> scrollPage(1));
+        addButton("أعلى الصفحة ↑", () -> scrollPage(-1));
+        addButton("تحديث", () -> {web.reload();web.requestFocus();});
         adButton = addButton(blockAds ? "حجب الإعلانات: يعمل" : "حجب الإعلانات: متوقف", () -> {
             blockAds = !blockAds;
             getPreferences(MODE_PRIVATE).edit().putBoolean("ads",blockAds).apply();
             adButton.setText(blockAds ? "حجب الإعلانات: يعمل" : "حجب الإعلانات: متوقف");
             web.reload();
-        });
-        pointerButton = addButton(pointerOn ? "المؤشر: يعمل" : "المؤشر: متوقف", () -> {
-            pointerOn = !pointerOn;
-            pointer.setVisibility(pointerOn ? View.VISIBLE : View.GONE);
-            pointerButton.setText(pointerOn ? "المؤشر: يعمل" : "المؤشر: متوقف");
-            getPreferences(MODE_PRIVATE).edit().putBoolean("pointer",pointerOn).apply();
             web.requestFocus();
         });
-        addButton("أعلى الصفحة", () -> web.scrollTo(0,0));
-        addButton("إخفاء الشريط", this::toggleToolbar);
+        addButton("إخفاء الأزرار", this::toggleToolbar);
+        addButton("إغلاق التطبيق", () -> finish());
         root.addView(controlScroll, new LinearLayout.LayoutParams(-1,dp(62)));
 
         status = new TextView(this);
@@ -132,7 +131,7 @@ public final class MainActivity extends Activity {
         status.setGravity(Gravity.RIGHT|Gravity.CENTER_VERTICAL);
         status.setPadding(dp(16),dp(3),dp(16),dp(3));
         status.setSingleLine(true);
-        status.setText("الأزرار العليا للتبديل بين الموقعين | MENU لعرض الأزرار | OK للاختيار");
+        status.setText("التمرير: السهمان أعلى وأسفل | رجوع: قائمة الأزرار | المؤشر: لاختيار الروابط");
         root.addView(status,new LinearLayout.LayoutParams(-1,dp(26)));
 
         browserArea = new FrameLayout(this);
@@ -147,6 +146,42 @@ public final class MainActivity extends Activity {
         browserArea.addView(pointer,new FrameLayout.LayoutParams(-1,-1));
         pointer.setVisibility(pointerOn ? View.VISIBLE : View.GONE);
         web.requestFocus();
+    }
+
+    private void updateStatus() {
+        if (status == null) return;
+        status.setText(pointerOn ?
+            "وضع المؤشر: الأسهم تحرك الماوس | OK للاختيار | رجوع للتمرير" :
+            "وضع التمرير: أعلى وأسفل لتحريك الصفحة | رجوع للقائمة | اختر المؤشر للضغط");
+    }
+
+    private void setMode(boolean mouse) {
+        pointerOn = mouse;
+        if (pointer != null) pointer.setVisibility(mouse ? View.VISIBLE : View.GONE);
+        if (scrollButton != null) scrollButton.setText(mouse ? "التمرير" : "التمرير ✓");
+        if (pointerButton != null) pointerButton.setText(mouse ? "المؤشر ✓" : "المؤشر");
+        getPreferences(MODE_PRIVATE).edit().putBoolean("pointer",mouse).apply();
+        updateStatus();
+        if (web != null) web.requestFocus();
+        Toast.makeText(this, mouse ? "المؤشر: الأسهم للتحريك وOK للضغط" :
+            "التمرير: السهمان أعلى وأسفل لتحريك الصفحة", Toast.LENGTH_SHORT).show();
+    }
+
+    private void scrollPage(int direction) {
+        if (web == null) return;
+        int dy = direction * 360;
+        String script = "(function(){var d="+dy+";" +
+            "var root=document.scrollingElement||document.documentElement;" +
+            "var before=root.scrollTop;" +
+            "window.scrollBy(0,d);" +
+            "if(root.scrollTop===before){" +
+            "var a=document.querySelectorAll('*');" +
+            "for(var i=0;i<a.length;i++){" +
+            "var e=a[i],s=getComputedStyle(e);" +
+            "if((s.overflowY==='auto'||s.overflowY==='scroll')&&e.scrollHeight>e.clientHeight+30){" +
+            "e.scrollTop+=d;break;}}" +
+            "}})();";
+        web.evaluateJavascript(script, null);
     }
 
     private boolean isAdvertisement(String host) {
@@ -201,7 +236,7 @@ public final class MainActivity extends Activity {
             }
             @Override public void onPageFinished(WebView v, String url) {
                 final String label = url.contains("old.akwam") ? "القديم" : "الجديد";
-                runOnUiThread(() -> status.setText("أكوام "+label+" | الحجب: "+(blockAds?"مفعل":"متوقف")+" | MENU للأزرار"));
+                runOnUiThread(() -> updateStatus());
                 if (blockAds) cleanPage();
             }
             @Override public void onReceivedSslError(WebView v, SslErrorHandler handler, SslError error) {
@@ -256,6 +291,20 @@ public final class MainActivity extends Activity {
             (e.getKeyCode()==KeyEvent.KEYCODE_PAGE_UP || e.getKeyCode()==KeyEvent.KEYCODE_CHANNEL_UP)) {
             web.pageUp(false);return true;
         }
+        if (web != null && web.hasFocus() &&
+            e.getKeyCode()==KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE &&
+            e.getAction()==KeyEvent.ACTION_DOWN) {
+            setMode(!pointerOn);
+            return true;
+        }
+        if (!pointerOn && web != null && web.hasFocus() &&
+            (e.getKeyCode()==KeyEvent.KEYCODE_DPAD_DOWN ||
+             e.getKeyCode()==KeyEvent.KEYCODE_DPAD_UP)) {
+            if (e.getAction()==KeyEvent.ACTION_DOWN) {
+                scrollPage(e.getKeyCode()==KeyEvent.KEYCODE_DPAD_DOWN ? 1 : -1);
+            }
+            return true;
+        }
         if (pointerOn && web != null && web.hasFocus()) {
             int key=e.getKeyCode();
             if (key==KeyEvent.KEYCODE_DPAD_LEFT||key==KeyEvent.KEYCODE_DPAD_RIGHT||
@@ -275,11 +324,12 @@ public final class MainActivity extends Activity {
         return super.dispatchKeyEvent(e);
     }
     @Override public void onBackPressed() {
-        if(fullscreenVideo!=null){closeVideo();return;}
-        if(web.hasFocus() && web.canGoBack()){web.goBack();return;}
-        if(web.hasFocus() || !toolbarOn){focusMenu();return;}
-        new android.app.AlertDialog.Builder(this).setMessage("إغلاق تطبيق أكوام للتلفزيون؟")
-            .setNegativeButton("لا",null).setPositiveButton("نعم",(d,w)->finish()).show();
+        if (fullscreenVideo != null) { closeVideo(); return; }
+        if (web != null && web.hasFocus()) {
+            if (pointerOn) { setMode(false); return; }
+            focusMenu(); return;
+        }
+        if (web != null) web.requestFocus();
     }
     private void closeVideo(){
         if(fullscreenVideo==null)return;
