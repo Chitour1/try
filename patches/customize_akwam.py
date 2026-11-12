@@ -138,3 +138,87 @@ assets = base / "app/src/main/assets"
 assets.mkdir(parents=True, exist_ok=True)
 (assets / "THIRD_PARTY_LICENSE_MROWSER.txt").write_text(license_text)
 print("Applied Akwam TV 2.1.0 silent popup and session-cleanup modifications.")
+
+
+# 2.2: Avoid automatically choosing the first detected stream, which may be an ad.
+# The user can still launch the detected movie from the native Play chip.
+change(
+    "app/src/main/kotlin/net/mrowser/data/Settings.kt",
+    "val autoOpenPlayer: Boolean = true,",
+    "val autoOpenPlayer: Boolean = false,"
+)
+change(
+    main,
+    '''        settings = JsonSettingsStore(File(filesDir, "settings.json"))
+        seedDefaultFavorites()''',
+    '''        settings = JsonSettingsStore(File(filesDir, "settings.json"))
+        // One-time migration for updates from v2.1, whose native player auto-launched
+        // for the first sniffed media URL, sometimes an advertising stream.
+        val migration = getPreferences(MODE_PRIVATE)
+        if (!migration.getBoolean("akwam_22_no_auto_player", false)) {
+            settings.update(settings.get().copy(autoOpenPlayer = false))
+            migration.edit().putBoolean("akwam_22_no_auto_player", true).apply()
+        }
+        seedDefaultFavorites()'''
+)
+change(
+    client,
+    '''        sniffer.onRequest(url, req.requestHeaders.orEmpty())
+        return adBlocker.intercept(req)''',
+    '''        val blocked = adBlocker.intercept(req)
+        if (blocked == null) sniffer.onRequest(url, req.requestHeaders.orEmpty())
+        return blocked'''
+)
+selector = "app/src/main/kotlin/net/mrowser/stream/StreamCandidateSelector.kt"
+change(selector, "?: manifests.minByOrNull { it.seq }", "?: manifests.maxByOrNull { it.seq }")
+player_source = "app/src/main/kotlin/net/mrowser/player/PlayerActivity.kt"
+change(
+    player_source,
+    '''            override fun onPlayerError(error: PlaybackException) {
+                Toast.makeText(this@PlayerActivity, "Stream error — back to web player", Toast.LENGTH_LONG).show()
+                finish()
+            }''',
+    '''            override fun onPlayerError(error: PlaybackException) {
+                Log.e(TAG, "Akwam native playback error: code=" + error.errorCode, error)
+                exo.playWhenReady = false
+                val host = android.net.Uri.parse(request.url).host ?: "غير معروف"
+                var httpCode: Int? = null
+                var cause: Throwable? = error
+                var depth = 0
+                while (cause != null && depth < 8) {
+                    if (cause is androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException) {
+                        httpCode = cause.responseCode
+                        break
+                    }
+                    cause = cause.cause
+                    depth++
+                }
+                val info = buildString {
+                    append("رمز الخطأ: ")
+                    append(error.errorCode)
+                    append("\\nخادم الفيديو: ")
+                    append(host)
+                    if (httpCode != null) {
+                        append("\\nاستجابة الخادم: HTTP ")
+                        append(httpCode)
+                    }
+                    append("\\nنوع المشكلة: ")
+                    append(error.cause?.javaClass?.simpleName ?: error.javaClass.simpleName)
+                }
+                AlertDialog.Builder(this@PlayerActivity)
+                    .setTitle("تعذر تشغيل مصدر الفيديو")
+                    .setMessage("أظهر التطبيق سبب تعطل المشغل بدل إغلاقه تلقائيًا.\\n\\n" +
+                        info + "\\n\\nإذا ظهر HTTP 403/401 فربما رفض الخادم تشغيل الرابط خارج المتصفح. " +
+                        "إذا ظهر رمز فك ترميز، فصيغة الفيديو قد لا يدعمها التلفزيون.")
+                    .setNegativeButton("إعادة المحاولة") { _, _ ->
+                        exo.prepare()
+                        exo.playWhenReady = true
+                    }
+                    .setPositiveButton("العودة إلى الموقع") { _, _ -> finish() }
+                    .setOnCancelListener { finish() }
+                    .show()
+            }'''
+)
+change("app/build.gradle.kts", "versionCode = 105", "versionCode = 106")
+change("app/build.gradle.kts", 'versionName = "2.1.0"', 'versionName = "2.2.0"')
+print("Applied Akwam TV 2.2.0 playback diagnostics and ad stream filtering.")
