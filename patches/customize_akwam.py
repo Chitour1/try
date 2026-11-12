@@ -456,3 +456,63 @@ change(
 change("app/build.gradle.kts", "versionCode = 107", "versionCode = 108")
 change("app/build.gradle.kts", 'versionName = "2.3.0"', 'versionName = "2.4.0"')
 print("Akwam TV 2.4: all new windows rejected silently; same-window navigation preserved.")
+
+
+# v2.5: On a connection failure to the observed downet.net CDN (error 2001),
+# use OkHttp's HTTP/2-capable network stack. Leave previously working hosts on
+# the original data source and preserve cookies/Referer/Origin and the exact
+# media URL. This is a targeted transport experiment, not a DRM bypass.
+change(
+    "app/build.gradle.kts",
+    "    implementation(libs.media3.ui)",
+    """    implementation(libs.media3.ui)
+    implementation("androidx.media3:media3-datasource-okhttp:1.10.1")
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")"""
+)
+change(
+    player_source,
+    """        val httpFactory = DefaultHttpDataSource.Factory()
+            .setDefaultRequestProperties(baseHeaders)
+            .setAllowCrossProtocolRedirects(true)""",
+    """        // One observed movie source fails to connect with the built-in
+        // HttpURLConnection transport on this TV, while other sources work.
+        // OkHttp enables HTTP/2 for this CDN only; do not disturb working hosts.
+        val sourceHost = android.net.Uri.parse(request.url).host.orEmpty()
+            .lowercase(java.util.Locale.ROOT)
+        val httpFactory: androidx.media3.datasource.HttpDataSource.Factory =
+            if (sourceHost == "downet.net" || sourceHost.endsWith(".downet.net")) {
+                androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(
+                    okhttp3.OkHttpClient.Builder()
+                        .followRedirects(true)
+                        .followSslRedirects(true)
+                        .retryOnConnectionFailure(true)
+                        .connectTimeout(20, java.util.concurrent.TimeUnit.SECONDS)
+                        .readTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+                        .build()
+                ).setDefaultRequestProperties(baseHeaders)
+            } else {
+                DefaultHttpDataSource.Factory()
+                    .setDefaultRequestProperties(baseHeaders)
+                    .setAllowCrossProtocolRedirects(true)
+            }"""
+)
+change(
+    player_source,
+    """                    append(error.cause?.javaClass?.simpleName ?: error.javaClass.simpleName)""",
+    """                    append(error.cause?.javaClass?.simpleName ?: error.javaClass.simpleName)
+                    val deepestCause = generateSequence(error.cause) { it.cause }
+                        .take(8).lastOrNull()
+                    if (deepestCause != null) {
+                        append("\\nالسبب التفصيلي: ")
+                        append(deepestCause.javaClass.simpleName)
+                        val reason = deepestCause.message.orEmpty()
+                            .substringBefore("?").take(120)
+                        if (reason.isNotBlank()) {
+                            append(" — ")
+                            append(reason)
+                        }
+                    }"""
+)
+change("app/build.gradle.kts", "versionCode = 108", "versionCode = 109")
+change("app/build.gradle.kts", 'versionName = "2.4.0"', 'versionName = "2.5.0"')
+print("Applied Akwam TV 2.5: targeted HTTP/2-capable OkHttp transport for downet.net and deeper error diagnostics.")
