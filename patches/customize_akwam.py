@@ -746,3 +746,139 @@ for obsolete in [
         raise RuntimeError("Expected obsolete player asset not found: "+obsolete)
     candidate.unlink()
 print("Removed remaining native-player-only components.")
+
+
+# v2.8 - Web pages link to the system's VLC/MX Player. They may redirect to
+# intent:/vlc: from a user click or open target=_blank in hidden popup WebViews.
+# Delegate only these recognized player links to installed Android apps.
+player_bridge = base / "app/src/main/kotlin/net/mrowser/web/AkwamPlayerLink.kt"
+player_bridge.write_text("""package net.mrowser.web
+
+import android.content.Intent
+import android.net.Uri
+import java.net.URISyntaxException
+
+/** Strictly classify player-specific Android deep links, not ads or arbitrary intents. */
+object AkwamPlayerLink {
+    fun isPlayerLink(url: String): Boolean {
+        val scheme = Uri.parse(url).scheme?.lowercase() ?: return false
+        if (scheme == "vlc" || scheme == "vlclauncher") return true
+        if (scheme != "intent") return false
+        val intent = try {
+            Intent.parseUri(url, Intent.URI_INTENT_SCHEME)
+        } catch (_: URISyntaxException) { return false }
+        return intent.getPackage() in setOf(
+            "com.mxtech.videoplayer.ad",
+            "com.mxtech.videoplayer.pro",
+            "org.videolan.vlc"
+        )
+    }
+}
+""")
+
+change(
+    "app/src/main/kotlin/net/mrowser/stream/SniffingWebViewClient.kt",
+    """import net.mrowser.web.ExternalSchemePolicy""",
+    """import net.mrowser.web.ExternalSchemePolicy
+import net.mrowser.web.AkwamPlayerLink"""
+)
+change(
+    "app/src/main/kotlin/net/mrowser/stream/SniffingWebViewClient.kt",
+    """            ExternalSchemePolicy.Decision.Ignore -> true""",
+    """            ExternalSchemePolicy.Decision.Ignore -> {
+                // Click-driven redirects sometimes lose the gesture flag.
+                // Only explicitly targeted VLC/MX links may reach an external app.
+                if (AkwamPlayerLink.isPlayerLink(url)) onExternalScheme(url)
+                true
+            }"""
+)
+
+# Hidden windows are still invisible and bounded. When a window created for
+# a video button points to VLC/MX, hand the URL to that installed app rather
+# than trying to load an intent: address as if it were an ordinary web page.
+change(
+    chrome,
+    """        hidden.webViewClient = object : WebViewClient() {}""",
+    """        hidden.webViewClient = object : WebViewClient() {
+            override fun shouldOverrideUrlLoading(
+                view: WebView?, request: WebResourceRequest?
+            ): Boolean {
+                val target = request?.url?.toString() ?: return false
+                if (AkwamPlayerLink.isPlayerLink(target)) {
+                    mainHandler.post { launchExternal(target) }
+                    return true
+                }
+                return false
+            }
+
+            @Deprecated("Compatibility with older WebView")
+            @Suppress("DEPRECATION")
+            override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean {
+                val target = url ?: return false
+                if (AkwamPlayerLink.isPlayerLink(target)) {
+                    mainHandler.post { launchExternal(target) }
+                    return true
+                }
+                return false
+            }
+        }"""
+)
+change(
+    chrome,
+    """import android.net.Uri""",
+    """import android.net.Uri
+import net.mrowser.web.AkwamPlayerLink"""
+)
+
+# MX intent links carry their real video URI. If VLC is installed but MX isn't,
+# forward that same URL to VLC's public ACTION_VIEW interface.
+external = "app/src/main/kotlin/net/mrowser/web/ExternalIntentLauncher.kt"
+change(
+    external,
+    """    fun launch(url: String) {""",
+    """    private fun openInVlc(mxIntent: Intent): Boolean {
+        val media = mxIntent.data ?: return false
+        val scheme = media.scheme?.lowercase()
+        if (scheme != "http" && scheme != "https") return false
+        val vlc = Intent(Intent.ACTION_VIEW)
+            .setDataAndType(media, "video/*")
+            .setPackage("org.videolan.vlc")
+            .addCategory(Intent.CATEGORY_BROWSABLE)
+        return try {
+            context.startActivity(vlc)
+            true
+        } catch (_: ActivityNotFoundException) {
+            false
+        } catch (_: SecurityException) {
+            false
+        }
+    }
+
+    fun launch(url: String) {"""
+)
+change(
+    external,
+    """        } catch (e: ActivityNotFoundException) {
+            if (fallback != null) onFallback(fallback) else onNoApp()""",
+    """        } catch (e: ActivityNotFoundException) {
+            val pkg = intent.getPackage()
+            val mx = pkg == "com.mxtech.videoplayer.ad" ||
+                pkg == "com.mxtech.videoplayer.pro"
+            if (!mx || !openInVlc(intent)) {
+                if (fallback != null) onFallback(fallback) else onNoApp()
+            }"""
+)
+
+change(
+    "app/src/main/AndroidManifest.xml",
+    """    <queries>
+        <intent>""",
+    """    <queries>
+        <package android:name="org.videolan.vlc" />
+        <package android:name="com.mxtech.videoplayer.ad" />
+        <package android:name="com.mxtech.videoplayer.pro" />
+        <intent>"""
+)
+change("app/build.gradle.kts", "versionCode = 111", "versionCode = 112")
+change("app/build.gradle.kts", 'versionName = "2.7.0"', 'versionName = "2.8.0"')
+print("Akwam TV 2.8: handle VLC/MX links from page and hidden popup, preserve site-only web playback.")
