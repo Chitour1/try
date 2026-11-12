@@ -362,3 +362,97 @@ change(
 change("app/build.gradle.kts", "versionCode = 106", "versionCode = 107")
 change("app/build.gradle.kts", 'versionName = "2.2.0"', 'versionName = "2.3.0"')
 print("Applied Akwam TV 2.3.0: user-approved watch links, mobile UA, no ad windows.")
+
+
+# v2.4: strict window-level behavior requested by the viewer.
+# Any attempt to create a NEW browsing window is discarded silently,
+# regardless of ad classification. Main-frame navigation in the SAME
+# window and embedded frames remain available.
+change(
+    chrome,
+    """        val host = view ?: return false
+        return openInCurrentWindow(host, resultMsg)
+    }""",
+    """        // Reject any new browsing window, never redirect it to the current page.
+        // Do not create relay WebViews, overlays, tabs or alerts.
+        return false
+    }"""
+)
+# Earlier cross-domain guard suppressed ordinary same-window navigation.
+# Remove it completely rather than asking users to authorize every transition.
+change(
+    client,
+    """        if (request.isForMainFrame && isUnexpectedExternalPage(view, url)) {
+            onExternalPage(target)
+            return true
+        }
+""",
+    ""
+)
+change(
+    client,
+    """        if (isUnexpectedExternalPage(view, uri)) {
+            onExternalPage(target)
+            return true
+        }
+""",
+    ""
+)
+def remove_between(path, start, end):
+    p = base / path
+    s = p.read_text()
+    a = s.index(start)
+    b = s.index(end, a)
+    p.write_text(s[:a] + s[b:])
+remove_between(
+    client,
+    "    /**\n     * The user only requested the Akwam domains.",
+    "    /** @return true when mrowser took the navigation and the WebView must not load it. */"
+)
+change(
+    client,
+    """    private val onNavigationBlocked: () -> Unit = {},
+    private val isTrustedExternalHost: (String) -> Boolean = { false },
+    private val onExternalPage: (String) -> Unit = {}""",
+    """    private val onNavigationBlocked: () -> Unit = {}"""
+)
+change(
+    main,
+    """    private lateinit var handoff: HandoffController
+    private val trustedExternalHosts = mutableSetOf<String>()
+    private var linkChoiceShowing = false""",
+    """    private lateinit var handoff: HandoffController"""
+)
+change(
+    main,
+    """            onNavigationBlocked = { /* Keep the film page in place without an interruption. */ },
+            isTrustedExternalHost = { host -> host in trustedExternalHosts },
+            onExternalPage = { url -> askAboutExternalLink(url) }""",
+    """            onNavigationBlocked = { /* Ignore blocked resources silently. */ }"""
+)
+change(
+    main,
+    """            onPopupTarget = { url -> askAboutExternalLink(url) },""",
+    """            onPopupTarget = { /* Never show or navigate popup targets. */ },"""
+)
+remove_between(
+    main,
+    "    private fun askAboutExternalLink(url: String) {",
+    "    private fun openUrl(url: String) {"
+)
+# Preserve browser defaults; mobile spoofing can change which video player is used.
+change(
+    main,
+    """            mediaPlaybackRequiresUserGesture = false
+            val chromiumVersion = Regex("Chrome/([0-9.]+)")
+                .find(userAgentString)?.groupValues?.get(1) ?: "120.0.0.0"
+            userAgentString = "Mozilla/5.0 (Linux; Android 13; Pixel 7) " +
+                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/" +
+                chromiumVersion + " Mobile Safari/537.36"
+            // Route window.open""",
+    """            mediaPlaybackRequiresUserGesture = false
+            // Route window.open"""
+)
+change("app/build.gradle.kts", "versionCode = 107", "versionCode = 108")
+change("app/build.gradle.kts", 'versionName = "2.3.0"', 'versionName = "2.4.0"')
+print("Akwam TV 2.4: all new windows rejected silently; same-window navigation preserved.")
