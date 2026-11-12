@@ -36,6 +36,6 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: AkwamTV-v2.1-PopupFix-APK
+          name: AkwamTV-v2.4-SilentNoPopups-APK
           path: engine/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
