@@ -221,9 +221,14 @@ public final class MainActivity extends Activity {
 
     private boolean isMediaCandidate(String url) {
         if (url == null || !url.startsWith("https://") || url.length() > 4096) return false;
-        String u = url.toLowerCase(java.util.Locale.ROOT);
-        return u.matches(".*\\\\.(m3u8|mp4|mpd|m4v|webm)(\\\\?.*)?$") ||
-            u.matches(".*/(playlist|master|manifest)(\\\\?.*)?$");
+        Uri uri = Uri.parse(url);
+        String path = uri.getPath();
+        if (path == null) return false;
+        path = path.toLowerCase(java.util.Locale.ROOT);
+        return path.endsWith(".m3u8") || path.endsWith(".mp4") ||
+            path.endsWith(".mpd") || path.endsWith(".m4v") ||
+            path.endsWith(".webm") || path.endsWith("/playlist") ||
+            path.endsWith("/master") || path.endsWith("/manifest");
     }
 
     private void scanVideoElements() {
@@ -232,7 +237,7 @@ public final class MainActivity extends Activity {
             "a.forEach(function(v){var s=v.currentSrc||v.src||v.getAttribute('src')||'';" +
             "if(s&&s.startsWith('https://'))AkwamNative.capture(s,location.href)});" +
             "document.querySelectorAll('iframe').forEach(function(v){" +
-            "var s=v.src||'';if(/\\\\.(m3u8|mp4|mpd)(\\\\?|$)/i.test(s))AkwamNative.capture(s,location.href)" +
+            "var s=v.src||'';if(s.startsWith('https://')&&/(m3u8|mp4|mpd)/i.test(s))AkwamNative.capture(s,location.href)" +
             "});}catch(e){}})();";
         if (web != null) web.evaluateJavascript(script, null);
     }
