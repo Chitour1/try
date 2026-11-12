@@ -631,3 +631,101 @@ change(
 change("app/build.gradle.kts", "versionCode = 109", "versionCode = 110")
 change("app/build.gradle.kts", 'versionName = "2.5.0"', 'versionName = "2.6.0"')
 print("Akwam TV 2.6: all web requests allowed; popups loaded invisibly and disposed safely.")
+
+
+# v2.7: web-player-only mode. Completely detach the native ExoPlayer handoff
+# and its "Play synchronized" chip. Fullscreen remains the HTML5 video
+# fullscreen provided by BrowserWebChromeClient, *not* a second player.
+change(
+    main,
+    """    private lateinit var handoff: HandoffController""",
+    """    // Video is played exclusively by the original site's HTML5/WebView player."""
+)
+change(
+    main,
+    """        sniffer = StreamSniffer(
+            userAgent = { webView.settings.userAgentString },
+            onStreamAvailable = {
+                runOnUiThread {
+                    showChip()
+                    if (settings.get().autoOpenPlayer) handoff.play()
+                }
+            },
+            onCleared = { playChip.visibility = View.GONE },
+            schedule = { delayMs, task -> uiHandler.postDelayed(task, delayMs) }
+        )
+        handoff = HandoffController(this, sniffer)""",
+    """        sniffer = StreamSniffer(
+            userAgent = { webView.settings.userAgentString },
+            onStreamAvailable = { /* No separate player; stay inside site. */ },
+            onCleared = { playChip.visibility = View.GONE },
+            schedule = { delayMs, task -> uiHandler.postDelayed(task, delayMs) }
+        )
+        playChip.visibility = View.GONE"""
+)
+change(
+    main,
+    """        layout.onChipClick = { handoff.play() }""",
+    """        layout.onChipClick = { /* The native player is permanently disabled. */ }"""
+)
+change(
+    main,
+    """        if (::sniffer.isInitialized && sniffer.hasStream() &&
+            homeView.visibility != View.VISIBLE && historyView.visibility != View.VISIBLE &&
+            settingsView.visibility != View.VISIBLE) showChip()""",
+    """        playChip.visibility = View.GONE"""
+)
+change(
+    main,
+    """    private fun showChip() {
+        playChip.visibility = View.VISIBLE
+        uiHandler.removeCallbacks(chipHideRunnable)
+        uiHandler.postDelayed(chipHideRunnable, CHIP_TIMEOUT_MS)
+    }""",
+    """    private fun showChip() {
+        // The site's embedded video player remains the only player.
+        playChip.visibility = View.GONE
+    }"""
+)
+change(
+    main,
+    """        webView.webChromeClient = chromeClient
+        webView.settings.apply {""",
+    """        webView.webChromeClient = chromeClient
+        // Embedded third-party video frames may require their own cookies.
+        android.webkit.CookieManager.getInstance().setAcceptCookie(true)
+        android.webkit.CookieManager.getInstance()
+            .setAcceptThirdPartyCookies(webView, true)
+        webView.settings.apply {"""
+)
+change(
+    "app/src/main/AndroidManifest.xml",
+    """        <activity
+            android:name=".player.PlayerActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|density|keyboardHidden"
+            android:screenOrientation="landscape"
+            android:theme="@style/Theme.Mrowser" />""",
+    """        <!-- External native video PlayerActivity removed: use the site's player. -->"""
+)
+# Remove the now-unreachable native player classes, rather than shipping them
+# alongside the page player, and remove libraries exclusive to that player.
+(base / "app/src/main/kotlin/net/mrowser/player/PlayerActivity.kt").unlink()
+(base / "app/src/main/kotlin/net/mrowser/handoff/HandoffController.kt").unlink()
+gradle_file = base / "app/build.gradle.kts"
+gradle_source = gradle_file.read_text()
+for dependency in [
+    "    implementation(libs.media3.exoplayer)",
+    "    implementation(libs.media3.exoplayer.hls)",
+    "    implementation(libs.media3.exoplayer.dash)",
+    "    implementation(libs.media3.ui)",
+    '    implementation("androidx.media3:media3-datasource-okhttp:1.10.1")',
+    '    implementation("com.squareup.okhttp3:okhttp:4.12.0")',
+]:
+    if dependency not in gradle_source:
+        raise RuntimeError("Cannot remove dependency: " + dependency)
+    gradle_source = gradle_source.replace(dependency + "\n", "")
+gradle_file.write_text(gradle_source)
+change("app/build.gradle.kts", "versionCode = 110", "versionCode = 111")
+change("app/build.gradle.kts", 'versionName = "2.6.0"', 'versionName = "2.7.0"')
+print("Akwam TV 2.7: no native player, no handoff, only embedded website HTML5 video.")
