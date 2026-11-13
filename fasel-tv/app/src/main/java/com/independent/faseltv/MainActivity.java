@@ -70,6 +70,7 @@ public final class MainActivity extends Activity {
     private WebView web;
     private View pointer;
     private TextView pageStatus;
+    private Button firstToolButton;
     private WebChromeClient.CustomViewCallback customCallback;
     private boolean inBrowser = false;
     private boolean pointerMode = false;
@@ -316,6 +317,7 @@ public final class MainActivity extends Activity {
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(46), 1f);
         lp.setMargins(dp(3), 0, dp(3), 0);
         bar.addView(b, lp);
+        if (firstToolButton == null) firstToolButton = b;
         b.setOnClickListener(v -> {
             onClick.run();
             if (inBrowser && !inFullScreen && browserPage.getVisibility() == View.VISIBLE)
@@ -449,7 +451,10 @@ public final class MainActivity extends Activity {
         if (inBrowser && !inFullScreen && event.getAction() == KeyEvent.ACTION_DOWN) {
             int key = event.getKeyCode();
             if (key == KeyEvent.KEYCODE_MENU) {
-                togglePointer();
+                // A single Menu press always exposes the toolbar to the TV remote.
+                // Select the pointer button from that toolbar when mouse mode is needed.
+                if (pointerMode) togglePointer();
+                else if (firstToolButton != null) firstToolButton.requestFocus();
                 return true;
             }
             if (pointerMode && getCurrentFocus() == web) {
