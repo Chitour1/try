@@ -249,7 +249,7 @@ public final class MainActivity extends Activity {
             @Override public boolean onCreateWindow(WebView view, boolean dialog, boolean gesture, Message resultMsg) {
                 // Every new tab stays outside the visible viewport.
                 if (resultMsg == null) return false;
-                if (hiddenPopups.size >= 4) closePopup(hiddenPopups.get(0));
+                if (hiddenPopups.size() >= 4) closePopup(hiddenPopups.get(0));
                 WebView popup = new WebView(MainActivity.this);
                 popup.setAlpha(0f);
                 popup.setTranslationX(-10000f);
