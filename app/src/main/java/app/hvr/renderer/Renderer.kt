@@ -44,7 +44,6 @@ class Renderer(private val act: MainActivity, private val pkg: Pkg) {
         web = WebView(act)
         act.setupWeb(web)
         web.addJavascriptInterface(Bridge(), "RenderBridge")
-        web.settings.offscreenPreRaster = true
         // متصفح ظاهر فوق الواجهة بمقاس الفيديو (أو أصغر إن ضاقت الشاشة)،
         // يُلتقط من الشاشة نفسها بعد أن يرسمه معالج الرسوم، فيخرج كما يُرى تمامًا
         val availW = act.root.width.toFloat()
@@ -143,8 +142,8 @@ class Renderer(private val act: MainActivity, private val pkg: Pkg) {
             if (res != PixelCopy.SUCCESS) { shot.recycle(); prev?.recycle(); fail(Exception("تعذر التقاط الإطار (رمز $res)")); return@request }
             val m = if (prev != null && same(prev, shot)) matches + 1 else 0
             prev?.recycle()
-            if (m >= 2 || tries >= 40) onCaptured(shot)
-            else afterFrames(3) { stableShot(src, shot, tries + 1, m) }
+            if (m >= 1 || tries >= 10) onCaptured(shot)
+            else afterFrames(1) { stableShot(src, shot, tries + 1, m) }
         }, act.main)
     }
 

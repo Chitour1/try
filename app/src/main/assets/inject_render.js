@@ -2,6 +2,10 @@
 (() => {
   'use strict';
   window.__RENDER_MODE__ = true;
+  // أقل عدد ممكن من الطبقات المستقلة: يمنع بقاء مربعات قديمة ويمنع الاهتزاز
+  const st = document.createElement('style');
+  st.textContent = '*,*::before,*::after{will-change:auto !important}';
+  (document.head || document.documentElement).appendChild(st);
   const realRAF = window.requestAnimationFrame.bind(window);
   let vt = 0; const d0 = Date.now();
   performance.now = () => vt;
