@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>مُصيِّر الفيديو</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%;background:#0b0f12;color:#EDEAE2;font-family:sans-serif}
+  main{max-width:520px;margin:0 auto;padding:28px 20px;display:flex;flex-direction:column;gap:14px}
+  h1{color:#F7E199;font-size:24px}
+  p.sub{color:#9aa6ab;line-height:1.8;font-size:14px}
+  .btn{display:block;width:100%;padding:16px;border-radius:14px;border:1px solid #24323a;background:#162026;color:#EDEAE2;font-size:17px;text-align:center}
+  .btn.gold{background:linear-gradient(135deg,#6d5717,#3f3210);border-color:#E5C158;color:#F7E199;font-weight:700}
+  .card{background:#12191d;border:1px solid #24323a;border-radius:14px;padding:14px;line-height:1.8}
+  #msg{color:#F7E199;min-height:1.6em}
+  .bar{height:12px;background:#1b252b;border-radius:99px;overflow:hidden;margin:10px 0}
+  .bar i{display:block;height:100%;width:0;background:linear-gradient(90deg,#E5C158,#F7E199)}
+  .hide{display:none}
+  .note{font-size:13px;color:#9aa6ab}
+</style>
+</head>
+<body>
+<main>
+  <h1>مُصيِّر الفيديو</h1>
+  <p class="sub">يحوّل حزمة التصميم (ملف zip، أو كل أجزائه معًا) إلى فيديو MP4 على هاتفك، مع معاينة وتعديل قبل التصيير.</p>
+  <div id="msg"></div>
+
+  <section id="home">
+    <button class="btn gold" onclick="AppBridge.pickPackage(false)">اختر حزمة ← معاينة وتعديل</button>
+    <div style="height:10px"></div>
+    <button class="btn" onclick="AppBridge.pickPackage(true)">اختر حزمة ← تصيير مباشر</button>
+    <div id="current" class="card hide" style="margin-top:14px">
+      <div>الحزمة الحالية: <b id="pname"></b></div>
+      <div style="height:10px"></div>
+      <button class="btn" onclick="AppBridge.editLast()">افتح المعاينة والتعديل</button>
+      <div style="height:8px"></div>
+      <button class="btn" onclick="AppBridge.renderLast()">صيّرها الآن</button>
+    </div>
+  </section>
+
+  <section id="rendering" class="card hide">
+    <div>جارٍ التصيير…</div>
+    <div class="bar"><i id="pbar"></i></div>
+    <div id="ptext" class="note"></div>
+    <p class="note" style="margin-top:8px">أبقِ التطبيق مفتوحًا والشاشة مضاءة حتى ينتهي.</p>
+    <div style="height:10px"></div>
+    <button class="btn" onclick="AppBridge.cancelRender()">إلغاء</button>
+  </section>
+
+  <section id="done" class="card hide">
+    <div>تم الفيديو: <b id="dname"></b></div>
+    <p class="note">حُفظ في المعرض: مجلد Movies/HtmlVideoRenderer</p>
+    <div style="height:10px"></div>
+    <button class="btn gold" onclick="AppBridge.openOutput()">افتح الفيديو</button>
+    <div style="height:8px"></div>
+    <button class="btn" onclick="AppBridge.shareOutput()">مشاركة</button>
+    <div style="height:8px"></div>
+    <button class="btn" onclick="showHome()">رجوع</button>
+  </section>
+</main>
+<script>
+  const $ = id => document.getElementById(id);
+  function only(id) { ['home', 'rendering', 'done'].forEach(s => $(s).classList.toggle('hide', s !== id)); }
+  function showMsg(t) { $('msg').textContent = t; }
+  function progress(p, t) { only('rendering'); $('pbar').style.width = p + '%'; $('ptext').textContent = p + '% · ' + t; }
+  function showDone(n) { only('done'); $('dname').textContent = n; showMsg(''); }
+  function showHome() {
+    only('home');
+    const s = JSON.parse(AppBridge.state());
+    $('current').classList.toggle('hide', !s.hasPackage);
+    $('pname').textContent = s.name;
+  }
+  (() => {
+    const s = JSON.parse(AppBridge.state());
+    if (s.message) showMsg(s.message);
+    if (s.rendering) progress(0, 'جارٍ التحضير…');
+    else if (s.done) showDone(s.name + '.mp4');
+    else showHome();
+  })();
+</script>
+</body>
+</html>

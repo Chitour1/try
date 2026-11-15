@@ -1,0 +1,33 @@
+name: build-apk
+on:
+  push:
+    branches: [hvr-android]
+  workflow_dispatch: {}
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+      - name: Build APK
+        run: gradle :app:assembleDebug --no-daemon --stacktrace
+      - name: Rename
+        run: cp app/build/outputs/apk/debug/app-debug.apk HtmlVideoRenderer.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: apk
+          path: HtmlVideoRenderer.apk
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete hvr-apk -y --cleanup-tag || true
+          gh release create hvr-apk HtmlVideoRenderer.apk --target hvr-android -t "HtmlVideoRenderer" -n "build ${{ github.run_number }}"

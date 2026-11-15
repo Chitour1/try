@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>معاينة الفيديو وتعديله قبل التصيير</title>
+<style>
+  :root{--bg:#0b0f12;--panel:#12191d;--line:#24323a;--gold:#E5C158;--gold2:#F7E199;--txt:#EDEAE2;--dim:#9aa6ab;--red:#e0705c;--green:#6cc497}
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%;background:var(--bg);color:var(--txt);font-family:"Segoe UI",Tahoma,"Noto Naskh Arabic",Arial,sans-serif;font-size:15px}
+  button,input,textarea,select{font:inherit;color:inherit}
+  #app{display:flex;height:100%;flex-direction:row}
+  /* لوحة التعديل يمينًا، والمعاينة يسارًا */
+  #panel{width:440px;flex-shrink:0;background:var(--panel);border-left:1px solid var(--line);display:flex;flex-direction:column;min-height:0}
+  #previewWrap{flex:1;display:flex;flex-direction:column;min-width:0;min-height:0}
+  #stageBox{flex:1;position:relative;overflow:hidden;min-height:0}
+  #frame{position:absolute;left:0;top:0;border:0;transform-origin:0 0;background:#000;box-shadow:0 10px 40px rgba(0,0,0,.6)}
+  #player{display:flex;align-items:center;gap:10px;padding:10px 14px;border-top:1px solid var(--line);background:var(--panel)}
+  #scrub{flex:1;accent-color:var(--gold);direction:rtl}
+  #tread{font-variant-numeric:tabular-nums;direction:ltr;min-width:96px;text-align:center;color:var(--gold2);font-size:13px}
+  .btn{background:#1b252b;border:1px solid var(--line);border-radius:10px;padding:8px 14px;cursor:pointer;white-space:nowrap}
+  .btn:hover{border-color:var(--gold)}
+  .btn.gold{background:linear-gradient(135deg,#6d5717,#3f3210);border-color:var(--gold);color:var(--gold2);font-weight:700}
+  .btn.small{padding:5px 10px;font-size:13px}
+  .btn:disabled{opacity:.45;cursor:default}
+  header{padding:12px 14px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:8px}
+  header h1{font-size:16px;color:var(--gold2)}
+  #status{font-size:12px;color:var(--dim)}
+  #tabs{display:flex;border-bottom:1px solid var(--line)}
+  #tabs button{flex:1;background:none;border:0;padding:10px 4px;cursor:pointer;color:var(--dim);border-bottom:2px solid transparent}
+  #tabs button.on{color:var(--gold2);border-bottom-color:var(--gold)}
+  #tabBody{flex:1;overflow:auto;padding:12px 14px;min-height:0}
+  .item{background:#0f1518;border:1px solid var(--line);border-radius:10px;padding:8px 10px;margin-bottom:8px}
+  .item label{display:block;font-size:12px;color:var(--dim);margin-bottom:4px}
+  .item textarea{width:100%;background:#0b1013;border:1px solid #2b3a42;border-radius:8px;padding:6px 8px;resize:vertical;min-height:38px;line-height:1.6}
+  .item.changed{border-color:var(--gold)}
+  .row{display:flex;align-items:center;gap:8px}
+  .row input[type=color]{width:46px;height:32px;border:1px solid var(--line);border-radius:6px;background:none;padding:0}
+  .row input[type=number]{width:110px;background:#0b1013;border:1px solid #2b3a42;border-radius:8px;padding:6px 8px}
+  .swatch-code{font-family:Consolas,monospace;direction:ltr;font-size:13px}
+  .thumb{width:64px;height:64px;object-fit:cover;border-radius:8px;background:#000;flex-shrink:0}
+  .path{font-family:Consolas,monospace;direction:ltr;font-size:12px;color:var(--dim);word-break:break-all;flex:1}
+  #search{width:100%;background:#0b1013;border:1px solid #2b3a42;border-radius:8px;padding:7px 10px;margin-bottom:10px}
+  .note{font-size:12px;color:var(--dim);line-height:1.7;margin-bottom:10px}
+  footer{padding:10px 14px;border-top:1px solid var(--line);display:flex;flex-wrap:wrap;gap:8px}
+  footer .grow{flex:1}
+  #toast{position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:#1d2a30;border:1px solid var(--gold);padding:10px 18px;border-radius:12px;opacity:0;transition:opacity .25s;pointer-events:none;z-index:9}
+  #toast.on{opacity:1}
+  /* الهاتف وما ضاق من الشاشات: المعاينة فوق والتعديل تحت */
+  @media (max-width:900px){
+    #app{flex-direction:column}
+    #panel{width:100%;border-left:0;border-top:1px solid var(--line);height:55%}
+    #previewWrap{height:45%;flex:none}
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <aside id="panel">
+    <header><h1>المعاينة والتعديل</h1><span id="status">جارٍ التحميل…</span></header>
+    <div id="tabs">
+      <button data-tab="texts" class="on">النصوص</button>
+      <button data-tab="colors">الألوان</button>
+      <button data-tab="assets">المواد</button>
+      <button data-tab="settings">الإعدادات</button>
+    </div>
+    <div id="tabBody"></div>
+    <footer>
+      <button class="btn gold" id="bRender">صيّر الآن</button>
+      <button class="btn" id="bSave">حفظ التعديلات</button>
+      <span class="grow"></span>
+      <button class="btn small" id="bExport">حفظ الحزمة المعدّلة</button>
+      <button class="btn small" id="bReset">التراجع عن الكل</button>
+      <button class="btn small" id="bCancel">إغلاق دون تصيير</button>
+    </footer>
+  </aside>
+  <section id="previewWrap">
+    <div id="stageBox"><iframe id="frame" title="معاينة"></iframe></div>
+    <div id="player">
+      <button class="btn" id="bPlay">▶ تشغيل</button>
+      <button class="btn small" id="bStart">⏮</button>
+      <input type="range" id="scrub" min="0" max="10000" step="10" value="0">
+      <span id="tread">0.0 / 0.0 ث</span>
+    </div>
+  </section>
+</div>
+<div id="toast"></div>
+
+<script>
+(() => {
+'use strict';
+/* =========================================================================
+   طبقة الربط مع المضيف: حاسوب (خادم محلي) أو هاتف (جسر أندرويد)
+   ========================================================================= */
+const isAndroid = typeof window.AndroidBridge !== 'undefined';
+let cbSeq = 0; const cbs = {};
+window.__hostCallback = (id, result) => { const f = cbs[id]; delete cbs[id]; if (f) f(result); };
+function androidAsync(method, ...args) { return new Promise(res => { const id = 'c' + (++cbSeq); cbs[id] = res; window.AndroidBridge[method](id, ...args); }); }
+
+const HOST = isAndroid ? {
+  pkgBase: window.AndroidBridge.pkgBase(),
+  source: async () => window.AndroidBridge.getSource(),
+  original: async () => window.AndroidBridge.getOriginal(),
+  config: async () => JSON.parse(window.AndroidBridge.getConfig()),
+  save: async (html, cfg) => window.AndroidBridge.save(html, JSON.stringify(cfg)) === 'ok',
+  pickAsset: async (accept) => { const r = await androidAsync('pickAsset', accept || '*/*'); return r ? JSON.parse(r) : null; },
+  exportZip: async () => androidAsync('exportZip'),
+  render: async () => window.AndroidBridge.render(),
+  cancel: async () => window.AndroidBridge.cancel()
+} : {
+  pkgBase: location.origin + '/pkg/',
+  source: async () => (await fetch('/__api/source', { cache: 'no-store' })).text(),
+  original: async () => (await fetch('/__api/original', { cache: 'no-store' })).text(),
+  config: async () => (await fetch('/__api/config', { cache: 'no-store' })).json(),
+  save: async (html, cfg) => (await fetch('/__api/save', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ html, config: cfg }) })).ok,
+  pickAsset: (accept) => new Promise(res => {
+    const inp = document.createElement('input'); inp.type = 'file'; if (accept) inp.accept = accept;
+    inp.onchange = async () => {
+      const f = inp.files[0]; if (!f) return res(null);
+      toast('جارٍ نسخ الملف…');
+      const r = await fetch('/__api/asset', { method: 'POST', headers: { 'x-name': encodeURIComponent(f.name) }, body: f });
+      res(r.ok ? await r.json() : null);
+    };
+    inp.click();
+  }),
+  exportZip: async () => (await (await fetch('/__api/export', { method: 'POST' })).json()).path,
+  render: async () => { await fetch('/__api/render', { method: 'POST' }); },
+  cancel: async () => { await fetch('/__api/cancel', { method: 'POST' }); }
+};
+
+/* =========================================================================
+   الحالة
+   ========================================================================= */
+const $ = s => document.querySelector(s);
+const frame = $('#frame'), stageBox = $('#stageBox'), scrub = $('#scrub'), tread = $('#tread');
+let doc = null;            // نسخة المصدر المحلَّلة (هي التي تُحفظ)
+let cfg = {};              // render.json
+let originalTexts = new Map();
+let dirty = false, curTab = 'texts';
+let t = 0, playing = false, lastTs = null, dur = 10000, hasFrame = false;
+
+function toast(msg, ms = 2200) { const el = $('#toast'); el.textContent = msg; el.classList.add('on'); clearTimeout(toast._t); toast._t = setTimeout(() => el.classList.remove('on'), ms); }
+function setStatus(s) { $('#status').textContent = s; }
+function markDirty() { dirty = true; setStatus('تعديلات غير محفوظة'); }
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+function parse(html) { return new DOMParser().parseFromString(html, 'text/html'); }
+function serialize(d) { return '<!DOCTYPE html>\n' + d.documentElement.outerHTML; }
+
+/* =========================================================================
+   المعاينة
+   ========================================================================= */
+function fitFrame() {
+  const W = cfg.width || 1080, H = cfg.height || 1920;
+  frame.style.width = W + 'px'; frame.style.height = H + 'px';
+  const bw = stageBox.clientWidth, bh = stageBox.clientHeight;
+  const sc = Math.min((bw - 20) / W, (bh - 20) / H);
+  frame.style.transform = `translate(${(bw - W * sc) / 2}px,${(bh - H * sc) / 2}px) scale(${sc})`;
+}
+addEventListener('resize', fitFrame);
+
+let reloadTimer = null;
+function reloadPreview(keepTime = true) {
+  clearTimeout(reloadTimer);
+  reloadTimer = setTimeout(() => {
+    const d = parse(serialize(doc));
+    const head = d.head || d.documentElement.insertBefore(d.createElement('head'), d.body);
+    const base = d.createElement('base'); base.href = HOST.pkgBase;
+    const flag = d.createElement('script'); flag.textContent = 'window.__PREVIEW__=true;';
+    head.insertBefore(flag, head.firstChild); head.insertBefore(base, head.firstChild);
+    const want = keepTime ? t : 0;
+    frame.onload = () => {
+      const w = frame.contentWindow;
+      const ready = (w.document.fonts && w.document.fonts.ready) ? w.document.fonts.ready : Promise.resolve();
+      ready.then(() => {
+        hasFrame = typeof w.renderFrame === 'function';
+        if (w.DURATION) dur = w.DURATION; else if (cfg.duration) dur = cfg.duration * 1000;
+        scrub.max = dur; scrub.disabled = !hasFrame;
+        if (hasFrame) { t = Math.min(want, dur); w.renderFrame(t); }
+        updateRead();
+        if (!hasFrame) setStatus('هذه الصفحة تُعرض كما هي (التنقل الدقيق غير متاح)');
+      });
+    };
+    frame.srcdoc = serialize(d);
+  }, 350);
+}
+function updateRead() { scrub.value = t; tread.textContent = `${(t / 1000).toFixed(1)} / ${(dur / 1000).toFixed(1)} ث`; }
+function loop(ts) {
+  if (lastTs === null) lastTs = ts;
+  const dt = ts - lastTs; lastTs = ts;
+  if (hasFrame) {
+    if (playing) { t += dt; if (t >= dur) { t = dur; setPlaying(false); } updateRead(); }
+    // نفرض الزمن في كل إطار حتى لو كانت الصفحة تشغّل نفسها تلقائيًا
+    try { frame.contentWindow.renderFrame(t); } catch (_) {}
+  }
+  requestAnimationFrame(loop);
+}
+function setPlaying(p) { playing = p; lastTs = null; $('#bPlay').textContent = p ? '❚❚ إيقاف' : '▶ تشغيل'; }
+$('#bPlay').onclick = () => {
+  if (!hasFrame) { t = 0; reloadPreview(false); return; }
+  if (!playing && t >= dur) t = 0;
+  setPlaying(!playing);
+};
+$('#bStart').onclick = () => { t = 0; if (hasFrame) { frame.contentWindow.renderFrame(0); updateRead(); } else reloadPreview(false); };
+scrub.oninput = () => { t = +scrub.value; setPlaying(false); try { frame.contentWindow.renderFrame(t); } catch (_) {} updateRead(); };
+addEventListener('keydown', e => { if (e.code === 'Space' && !/TEXTAREA|INPUT/.test(document.activeElement.tagName)) { e.preventDefault(); $('#bPlay').click(); } });
+
+/* =========================================================================
+   التبويبات
+   ========================================================================= */
+document.querySelectorAll('#tabs button').forEach(b => b.onclick = () => {
+  document.querySelectorAll('#tabs button').forEach(x => x.classList.toggle('on', x === b));
+  curTab = b.dataset.tab; renderTab();
+});
+function renderTab() { ({ texts: tabTexts, colors: tabColors, assets: tabAssets, settings: tabSettings })[curTab](); }
+
+/* ---------- النصوص ---------- */
+function textNodes() {
+  const out = [];
+  const w = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT);
+  let n; while ((n = w.nextNode())) {
+    const p = n.parentElement; if (!p) continue;
+    if (/^(SCRIPT|STYLE|NOSCRIPT|TEMPLATE)$/i.test(p.tagName)) continue;
+    if (!n.nodeValue.trim()) continue;
+    out.push(n);
+  }
+  return out;
+}
+function labelFor(n) {
+  const p = n.parentElement;
+  const id = p.id ? '#' + p.id : (p.closest('[id]') ? 'داخل #' + p.closest('[id]').id : p.tagName.toLowerCase());
+  return id;
+}
+function tabTexts() {
+  const nodes = textNodes();
+  const body = $('#tabBody');
+  body.innerHTML = `<input id="search" placeholder="ابحث في النصوص…"><p class="note">عدّل أي نص فيتغير في المعاينة مباشرة. النصوص مرتبة بحسب ظهورها في التصميم.</p><div id="list"></div>`;
+  const list = $('#list');
+  nodes.forEach((n, i) => {
+    if (!originalTexts.has(n)) originalTexts.set(n, n.nodeValue);
+    const it = document.createElement('div'); it.className = 'item' + (originalTexts.get(n) !== n.nodeValue ? ' changed' : '');
+    it.innerHTML = `<label>${i + 1} · ${esc(labelFor(n))}</label><textarea rows="${Math.min(4, Math.ceil(n.nodeValue.trim().length / 34))}"></textarea>`;
+    const ta = it.querySelector('textarea'); ta.value = n.nodeValue.trim();
+    ta.oninput = () => {
+      const lead = n.nodeValue.match(/^\s*/)[0], trail = n.nodeValue.match(/\s*$/)[0];
+      n.nodeValue = lead + ta.value + trail;
+      it.classList.toggle('changed', originalTexts.get(n) !== n.nodeValue);
+      markDirty(); reloadPreview();
+    };
+    list.appendChild(it);
+  });
+  $('#search').oninput = e => {
+    const q = e.target.value.trim();
+    list.querySelectorAll('.item').forEach(it => { it.style.display = !q || it.querySelector('textarea').value.includes(q) ? '' : 'none'; });
+  };
+}
+
+/* ---------- الألوان ---------- */
+function tabColors() {
+  const html = serialize(doc);
+  const counts = {};
+  (html.match(/#[0-9a-fA-F]{6}\b/g) || []).forEach(c => { c = c.toUpperCase(); counts[c] = (counts[c] || 0) + 1; });
+  const colors = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 30);
+  const body = $('#tabBody');
+  body.innerHTML = `<p class="note">أهم الألوان المستعملة في التصميم مرتبة بحسب كثرة استعمالها. تغيير لون يستبدله في كل مكان ظهر فيه.</p><div id="list"></div>`;
+  colors.forEach(([c, k]) => {
+    const it = document.createElement('div'); it.className = 'item';
+    it.innerHTML = `<div class="row"><input type="color" value="${c.toLowerCase()}"><span class="swatch-code">${c}</span><span class="note" style="margin:0">مستعمل ${k} مرة</span></div>`;
+    const inp = it.querySelector('input'); let cur = c;
+    inp.onchange = () => {
+      const nv = inp.value.toUpperCase();
+      const src = serialize(doc).replace(new RegExp(cur.replace('#', '#'), 'gi'), nv);
+      doc = parse(src); originalTexts = new Map(); cur = nv;
+      it.querySelector('.swatch-code').textContent = nv + ' (كان ' + c + ')';
+      markDirty(); reloadPreview();
+    };
+    $('#list').appendChild(it);
+  });
+}
+
+/* ---------- المواد ---------- */
+function assetRefs() {
+  const refs = [];
+  doc.querySelectorAll('img[src],video[src],audio[src],source[src]').forEach(el => refs.push({ el, attr: 'src', kind: el.tagName.toLowerCase() }));
+  doc.querySelectorAll('image').forEach(el => { const a = el.hasAttribute('href') ? 'href' : (el.hasAttribute('xlink:href') ? 'xlink:href' : null); if (a) refs.push({ el, attr: a, kind: 'image' }); });
+  return refs.filter(r => !/^(data:|https?:)/i.test(r.el.getAttribute(r.attr) || ''));
+}
+function acceptFor(kind) { return kind === 'img' || kind === 'image' ? 'image/*' : kind === 'audio' ? 'audio/*' : kind === 'video' ? 'video/*' : '*/*'; }
+function tabAssets() {
+  const body = $('#tabBody');
+  body.innerHTML = `<p class="note">الصور واللقطات والصوت التي يستعملها التصميم. «استبدال» يضع ملفًا من جهازك مكان المادة، ويُنسخ الملف داخل الحزمة.</p><div id="list"></div>`;
+  const list = $('#list');
+  const add = (title, path, kind, onReplace) => {
+    const it = document.createElement('div'); it.className = 'item';
+    const isImg = kind === 'img' || kind === 'image';
+    const isVid = kind === 'video' || kind === 'source';
+    const prev = isImg ? `<img class="thumb" src="${esc(HOST.pkgBase + path)}">` : isVid ? `<video class="thumb" src="${esc(HOST.pkgBase + path)}#t=0.5" muted></video>` : `<div class="thumb" style="display:flex;align-items:center;justify-content:center">♪</div>`;
+    it.innerHTML = `<label>${esc(title)}</label><div class="row">${prev}<span class="path">${esc(path)}</span><button class="btn small">استبدال</button></div>`;
+    it.querySelector('button').onclick = async () => {
+      const r = await HOST.pickAsset(acceptFor(kind));
+      if (!r || !r.path) return;
+      onReplace(r.path); markDirty(); reloadPreview(); tabAssets(); toast('استُبدلت المادة.');
+    };
+    list.appendChild(it);
+  };
+  if (cfg.audio) add('الصوت النهائي للفيديو (من render.json)', cfg.audio, 'audio', p => { cfg.audio = p; });
+  const refs = assetRefs();
+  refs.forEach((r, i) => add(`${i + 1} · ${({ img: 'صورة', image: 'صورة', video: 'لقطة فيديو', source: 'لقطة فيديو', audio: 'صوت' })[r.kind]}${r.el.id ? ' #' + r.el.id : ''}`,
+    r.el.getAttribute(r.attr), r.kind, p => { r.el.setAttribute(r.attr, p); }));
+  if (!refs.length && !cfg.audio) list.innerHTML = '<p class="note">لا توجد مواد خارجية في هذا التصميم؛ كل رسومه مرسومة داخل الرمز.</p>';
+}
+
+/* ---------- الإعدادات ---------- */
+function tabSettings() {
+  const body = $('#tabBody');
+  body.innerHTML = `
+    <p class="note">إعدادات التصيير (تُحفظ في render.json).</p>
+    <div class="item"><label>المدة بالثواني</label><div class="row"><input type="number" id="sDur" step="0.1" min="0.5"></div></div>
+    <div class="item"><label>عدد الإطارات في الثانية</label><div class="row"><select id="sFps" class="btn"><option>24</option><option>25</option><option>30</option><option>60</option></select></div></div>
+    <div class="item"><label>الجودة (كلما قل الرقم زادت الجودة والحجم؛ 18 ممتاز)</label><div class="row"><input type="number" id="sCrf" min="12" max="30"></div></div>
+    <div class="item"><label>الأبعاد</label><div class="row"><span class="swatch-code">${cfg.width || 1080} × ${cfg.height || 1920}</span></div></div>`;
+  $('#sDur').value = cfg.duration || (dur / 1000);
+  $('#sFps').value = String(cfg.fps || 30);
+  $('#sCrf').value = cfg.crf || 18;
+  $('#sDur').onchange = e => { cfg.duration = +e.target.value; dur = cfg.duration * 1000; scrub.max = dur; updateRead(); markDirty(); };
+  $('#sFps').onchange = e => { cfg.fps = +e.target.value; markDirty(); };
+  $('#sCrf').onchange = e => { cfg.crf = +e.target.value; markDirty(); };
+}
+
+/* =========================================================================
+   الأزرار
+   ========================================================================= */
+async function save() {
+  const ok = await HOST.save(serialize(doc), cfg);
+  if (ok) { dirty = false; setStatus('محفوظ'); } else toast('تعذر الحفظ!');
+  return ok;
+}
+$('#bSave').onclick = async () => { if (await save()) toast('حُفظت التعديلات.'); };
+$('#bRender').onclick = async () => {
+  if (dirty && !(await save())) return;
+  setPlaying(false);
+  document.body.innerHTML = '<div style="height:100%;display:flex;align-items:center;justify-content:center;font-size:22px;color:#F7E199;text-align:center;line-height:2">بدأ التصيير…<br><span style="font-size:15px;color:#9aa6ab">تابع التقدم في نافذة الأداة. يمكنك إغلاق هذه النافذة.</span></div>';
+  await HOST.render();
+};
+$('#bCancel').onclick = async () => {
+  if (dirty && !confirm('لديك تعديلات غير محفوظة. هل تريد الإغلاق دون حفظها؟')) return;
+  await HOST.cancel();
+  document.body.innerHTML = '<div style="height:100%;display:flex;align-items:center;justify-content:center;font-size:20px;color:#9aa6ab">أُغلقت المعاينة دون تصيير.</div>';
+};
+$('#bReset').onclick = async () => {
+  if (!confirm('سترجع الحزمة إلى حالتها الأصلية كما وصلتك. متابعة؟')) return;
+  doc = parse(await HOST.original()); originalTexts = new Map(); markDirty(); renderTab(); reloadPreview(); toast('عادت النسخة الأصلية؛ اضغط «حفظ» لاعتمادها.');
+};
+$('#bExport').onclick = async () => {
+  if (dirty && !(await save())) return;
+  toast('جارٍ تجهيز الحزمة…');
+  const p = await HOST.exportZip();
+  toast(p ? 'حُفظت الحزمة المعدّلة: ' + p : 'تعذر حفظ الحزمة', 5000);
+};
+addEventListener('beforeunload', e => { if (dirty) { e.preventDefault(); e.returnValue = ''; } });
+
+/* =========================================================================
+   البداية
+   ========================================================================= */
+(async () => {
+  try {
+    cfg = await HOST.config();
+    doc = parse(await HOST.source());
+    if (cfg.duration) dur = cfg.duration * 1000;
+    fitFrame(); renderTab(); reloadPreview(false); requestAnimationFrame(loop);
+    setStatus('جاهز');
+  } catch (e) { setStatus('خطأ: ' + e.message); }
+})();
+})();
+</script>
+</body>
+</html>
