@@ -17,7 +17,10 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.graphics.Color
+import android.view.Gravity
 import android.widget.FrameLayout
+import android.widget.TextView
 import org.json.JSONObject
 import java.io.File
 import java.util.concurrent.Executors
@@ -36,6 +39,7 @@ class MainActivity : Activity() {
     var pendingPick: String? = null
     var fastMode = false
     var lastMessage: String? = null
+    lateinit var overlay: TextView
 
     companion object {
         const val REQ_PKG = 11
@@ -44,7 +48,6 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        WebView.enableSlowWholeDocumentDraw()
         pkg = Pkg(this)
         root = FrameLayout(this)
         ui = WebView(this)
@@ -52,6 +55,17 @@ class MainActivity : Activity() {
         ui.addJavascriptInterface(AppBridge(), "AppBridge")
         ui.addJavascriptInterface(EditorBridge(), "AndroidBridge")
         root.addView(ui, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+        // شريط التقدم أسفل الشاشة أثناء التصيير (خارج منطقة الالتقاط)
+        overlay = TextView(this).apply {
+            setBackgroundColor(Color.rgb(18, 25, 29))
+            setTextColor(Color.rgb(247, 225, 153))
+            textSize = 15f
+            gravity = Gravity.CENTER
+            setPadding(24, 12, 24, 12)
+            visibility = android.view.View.GONE
+            setOnClickListener { renderer?.cancel() }
+        }
+        root.addView(overlay, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, overlayHeight(), Gravity.BOTTOM))
         setContentView(root)
         goHome()
         handleIntent(intent)
@@ -82,6 +96,14 @@ class MainActivity : Activity() {
 
     fun progress(pct: Int, text: String) {
         js("window.progress && progress($pct, ${JSONObject.quote(text)})")
+        main.post { overlay.text = "$pct% · $text\nاضغط هنا للإلغاء" }
+    }
+
+    fun overlayHeight(): Int = (resources.displayMetrics.density * 72).toInt()
+
+    fun showOverlay(on: Boolean) {
+        overlay.visibility = if (on) android.view.View.VISIBLE else android.view.View.GONE
+        if (on) overlay.bringToFront()
     }
 
     fun callback(id: String, result: String?) {

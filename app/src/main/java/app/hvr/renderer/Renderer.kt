@@ -1,9 +1,11 @@
 package app.hvr.renderer
 
 import android.graphics.Bitmap
-import android.graphics.Canvas
-import android.graphics.Color
+import android.graphics.Rect
 import android.os.SystemClock
+import android.view.Choreographer
+import android.view.Gravity
+import android.view.PixelCopy
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import android.widget.FrameLayout
@@ -27,6 +29,8 @@ class Renderer(private val act: MainActivity, private val pkg: Pkg) {
     private var frame = 0
     private var token = 0
     private var clip: JSONObject? = null
+    private var cw = 1080
+    private var ch = 1920
     private var startTime = 0L
     private var lastUi = 0L
     @Volatile private var stopped = false
@@ -40,8 +44,15 @@ class Renderer(private val act: MainActivity, private val pkg: Pkg) {
         web = WebView(act)
         act.setupWeb(web)
         web.addJavascriptInterface(Bridge(), "RenderBridge")
-        // المتصفح المخفي بمقاس الفيديو الحقيقي، خلف الواجهة
-        act.root.addView(web, 0, FrameLayout.LayoutParams(w, h))
+        // متصفح ظاهر فوق الواجهة بمقاس الفيديو (أو أصغر إن ضاقت الشاشة)،
+        // يُلتقط من الشاشة نفسها بعد أن يرسمه معالج الرسوم، فيخرج كما يُرى تمامًا
+        val availW = act.root.width.toFloat()
+        val availH = (act.root.height - act.overlayHeight()).toFloat()
+        val k = minOf(1f, availW / w, availH / h)
+        cw = (w * k).toInt()
+        ch = (h * k).toInt()
+        act.root.addView(web, FrameLayout.LayoutParams(cw, ch, Gravity.TOP or Gravity.CENTER_HORIZONTAL))
+        act.showOverlay(true)
         act.renderWeb = web
         act.progress(0, "جارٍ تحميل التصميم…")
         web.loadUrl("$HOST/pkg/index.html?render=1")
@@ -96,16 +107,33 @@ class Renderer(private val act: MainActivity, private val pkg: Pkg) {
     }
 
     private fun capture() {
-        val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-        val c = Canvas(bmp)
-        c.drawColor(Color.BLACK)
-        val d = act.resources.displayMetrics.density
-        clip?.let { cl ->
-            val s = (w / (cl.getDouble("w") * d)).toFloat()
-            c.scale(s, s)
-            c.translate((-cl.getDouble("x") * d).toFloat(), (-cl.getDouble("y") * d).toFloat())
+        // ننتظر إطارين من الشاشة حتى يُعرض آخر ما رُسم، ثم نلتقطه
+        Choreographer.getInstance().postFrameCallback {
+            Choreographer.getInstance().postFrameCallback { copy() }
         }
-        web.draw(c)
+    }
+
+    private fun copy() {
+        if (stopped) return
+        val loc = IntArray(2)
+        web.getLocationInWindow(loc)
+        val src: Rect = clip?.let { cl ->
+            val dd = act.resources.displayMetrics.density
+            Rect((loc[0] + cl.getDouble("x") * dd).toInt(), (loc[1] + cl.getDouble("y") * dd).toInt(),
+                (loc[0] + (cl.getDouble("x") + cl.getDouble("w")) * dd).toInt(), (loc[1] + (cl.getDouble("y") + cl.getDouble("h")) * dd).toInt())
+        } ?: Rect(loc[0], loc[1], loc[0] + cw, loc[1] + ch)
+        val shot = Bitmap.createBitmap(src.width().coerceAtLeast(1), src.height().coerceAtLeast(1), Bitmap.Config.ARGB_8888)
+        PixelCopy.request(act.window, src, shot, { res ->
+            if (res == PixelCopy.SUCCESS) onCaptured(shot)
+            else { shot.recycle(); fail(Exception("تعذر التقاط الإطار (رمز $res)")) }
+        }, act.main)
+    }
+
+    private fun onCaptured(shot: Bitmap) {
+        if (stopped) { shot.recycle(); return }
+        val bmp = if (shot.width != w || shot.height != h) {
+            Bitmap.createScaledBitmap(shot, w, h, true).also { shot.recycle() }
+        } else shot
         val idx = frame
         val e = enc!!
         pending.incrementAndGet()
@@ -159,6 +187,7 @@ class Renderer(private val act: MainActivity, private val pkg: Pkg) {
 
     private fun cleanup() {
         try { act.root.removeView(web); web.destroy() } catch (_: Exception) { }
+        act.showOverlay(false)
         act.renderWeb = null
         VideoFrames.release()
     }
