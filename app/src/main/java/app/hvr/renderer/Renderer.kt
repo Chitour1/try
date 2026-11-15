@@ -44,6 +44,7 @@ class Renderer(private val act: MainActivity, private val pkg: Pkg) {
         web = WebView(act)
         act.setupWeb(web)
         web.addJavascriptInterface(Bridge(), "RenderBridge")
+        web.settings.offscreenPreRaster = true
         // متصفح ظاهر فوق الواجهة بمقاس الفيديو (أو أصغر إن ضاقت الشاشة)،
         // يُلتقط من الشاشة نفسها بعد أن يرسمه معالج الرسوم، فيخرج كما يُرى تمامًا
         val availW = act.root.width.toFloat()
@@ -122,11 +123,38 @@ class Renderer(private val act: MainActivity, private val pkg: Pkg) {
             Rect((loc[0] + cl.getDouble("x") * dd).toInt(), (loc[1] + cl.getDouble("y") * dd).toInt(),
                 (loc[0] + (cl.getDouble("x") + cl.getDouble("w")) * dd).toInt(), (loc[1] + (cl.getDouble("y") + cl.getDouble("h")) * dd).toInt())
         } ?: Rect(loc[0], loc[1], loc[0] + cw, loc[1] + ch)
+        stableShot(src, null, 0)
+    }
+
+    /** يلتقط الإطار مرارًا حتى تتطابق لقطتان متتاليتان، أي حتى يكتمل رسم الشاشة كلها */
+    private fun stableShot(src: Rect, prev: Bitmap?, tries: Int) {
         val shot = Bitmap.createBitmap(src.width().coerceAtLeast(1), src.height().coerceAtLeast(1), Bitmap.Config.ARGB_8888)
         PixelCopy.request(act.window, src, shot, { res ->
-            if (res == PixelCopy.SUCCESS) onCaptured(shot)
-            else { shot.recycle(); fail(Exception("تعذر التقاط الإطار (رمز $res)")) }
+            if (stopped) { shot.recycle(); prev?.recycle(); return@request }
+            if (res != PixelCopy.SUCCESS) { shot.recycle(); prev?.recycle(); fail(Exception("تعذر التقاط الإطار (رمز $res)")); return@request }
+            if (prev != null && (same(prev, shot) || tries >= 12)) {
+                prev.recycle()
+                onCaptured(shot)
+            } else {
+                prev?.recycle()
+                Choreographer.getInstance().postFrameCallback { stableShot(src, shot, tries + 1) }
+            }
         }, act.main)
+    }
+
+    private val rowA = IntArray(4096)
+    private val rowB = IntArray(4096)
+    private fun same(a: Bitmap, b: Bitmap): Boolean {
+        if (a.width != b.width || a.height != b.height) return false
+        val wd = minOf(a.width, 4096)
+        var y = 0
+        while (y < a.height) {
+            a.getPixels(rowA, 0, wd, 0, y, wd, 1)
+            b.getPixels(rowB, 0, wd, 0, y, wd, 1)
+            for (x in 0 until wd) if (rowA[x] != rowB[x]) return false
+            y += 3
+        }
+        return true
     }
 
     private fun onCaptured(shot: Bitmap) {
