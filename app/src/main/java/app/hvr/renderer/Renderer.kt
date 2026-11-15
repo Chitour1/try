@@ -126,19 +126,25 @@ class Renderer(private val act: MainActivity, private val pkg: Pkg) {
         stableShot(src, null, 0)
     }
 
-    /** يلتقط الإطار مرارًا حتى تتطابق لقطتان متتاليتان، أي حتى يكتمل رسم الشاشة كلها */
-    private fun stableShot(src: Rect, prev: Bitmap?, tries: Int) {
+    /** ينتظر عددًا من إطارات الشاشة ثم ينفّذ */
+    private fun afterFrames(n: Int, fn: () -> Unit) {
+        if (n <= 0) { fn(); return }
+        Choreographer.getInstance().postFrameCallback { afterFrames(n - 1, fn) }
+    }
+
+    /**
+     * يلتقط الإطار مرارًا ولا يعتمده إلا إذا تطابقت ثلاث لقطات متتالية بينها مهلة،
+     * أي بعد أن يستبدل المتصفح كل المربعات القديمة أو المنخفضة الدقة بالرسم النهائي.
+     */
+    private fun stableShot(src: Rect, prev: Bitmap?, tries: Int, matches: Int = 0) {
         val shot = Bitmap.createBitmap(src.width().coerceAtLeast(1), src.height().coerceAtLeast(1), Bitmap.Config.ARGB_8888)
         PixelCopy.request(act.window, src, shot, { res ->
             if (stopped) { shot.recycle(); prev?.recycle(); return@request }
             if (res != PixelCopy.SUCCESS) { shot.recycle(); prev?.recycle(); fail(Exception("تعذر التقاط الإطار (رمز $res)")); return@request }
-            if (prev != null && (same(prev, shot) || tries >= 12)) {
-                prev.recycle()
-                onCaptured(shot)
-            } else {
-                prev?.recycle()
-                Choreographer.getInstance().postFrameCallback { stableShot(src, shot, tries + 1) }
-            }
+            val m = if (prev != null && same(prev, shot)) matches + 1 else 0
+            prev?.recycle()
+            if (m >= 2 || tries >= 40) onCaptured(shot)
+            else afterFrames(3) { stableShot(src, shot, tries + 1, m) }
         }, act.main)
     }
 
@@ -152,7 +158,7 @@ class Renderer(private val act: MainActivity, private val pkg: Pkg) {
             a.getPixels(rowA, 0, wd, 0, y, wd, 1)
             b.getPixels(rowB, 0, wd, 0, y, wd, 1)
             for (x in 0 until wd) if (rowA[x] != rowB[x]) return false
-            y += 3
+            y += 2
         }
         return true
     }
