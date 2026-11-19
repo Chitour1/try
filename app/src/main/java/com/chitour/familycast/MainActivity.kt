@@ -117,8 +117,9 @@ class MainActivity : AppCompatActivity() {
         val ex = i.extras
         when (i.action) {
             Intent.ACTION_VIEW -> {
-                val d = i.data ?: return false
-                if (d.scheme == "wvc-x-callback" || d.scheme == "familycast") {
+                val d = i.data
+                if (d == null) url = findUrlInExtras(ex)
+                else if (d.scheme == "wvc-x-callback" || d.scheme == "familycast") {
                     url = d.getQueryParameter("url") ?: d.getQueryParameter("uri")
                     title = d.getQueryParameter("title") ?: d.getQueryParameter("filename")
                     ref = d.getQueryParameter("referer") ?: d.getQueryParameter("referrer") ?: ""
@@ -135,8 +136,10 @@ class MainActivity : AppCompatActivity() {
                 val st = ex?.get(Intent.EXTRA_STREAM) as? Uri
                 url = st?.toString() ?: i.getStringExtra(Intent.EXTRA_TEXT)?.let { Regex("""https?://\S+""").find(it)?.value }
             }
-            else -> return false
+            else -> url = i.dataString ?: findUrlInExtras(ex)
         }
+        if (url == null && i.action == Intent.ACTION_MAIN && i.categories?.contains(Intent.CATEGORY_LAUNCHER) == true) return false
+        if (url == null && i.action == Intent.ACTION_MAIN) return false
         val extraHdr = LinkedHashMap<String, String>()
         var subUrl: String? = null
         var startPos = 0L
@@ -162,7 +165,10 @@ class MainActivity : AppCompatActivity() {
             ex.getString("referer")?.let { ref = it }
             ex.getString("Referer")?.let { ref = it }
             ex.getString("user-agent")?.let { ua = it }
-            subUrl = ex.getString("subtitle") ?: (try { ex.getStringArray("subs") } catch (e: Exception) { null })?.firstOrNull()
+            @Suppress("DEPRECATION")
+            val subsP = try { ex.getParcelableArray("subs") } catch (e: Exception) { null }
+            subUrl = ex.getString("subtitle") ?: (subsP?.firstOrNull() as? Uri)?.toString()
+                ?: (try { ex.getStringArray("subs") } catch (e: Exception) { null })?.firstOrNull()
             @Suppress("DEPRECATION")
             val posObj = ex.get("position")
             startPos = (posObj as? Number)?.toLong() ?: 0L
@@ -177,6 +183,22 @@ class MainActivity : AppCompatActivity() {
         val needProxy = ref.isNotEmpty() || extraHdr.isNotEmpty()
         newMovie(u, ref, ua, needProxy, title)
         return true
+    }
+
+    /** يبحث عن رابط فيديو في أي معطى من المعطيات المرسلة */
+    private fun findUrlInExtras(ex: Bundle?): String? {
+        if (ex == null) return null
+        for (k in listOf("url", "uri", "video", "videoUrl", "video_url", "link", "stream", "file")) {
+            val v = try { ex.getString(k) } catch (e: Exception) { null }
+            if (v != null && (v.startsWith("http") || v.startsWith("content"))) return v
+        }
+        for (k in ex.keySet()) {
+            @Suppress("DEPRECATION")
+            val v = ex.get(k)
+            val t = (v as? String) ?: (v as? Uri)?.toString() ?: continue
+            Regex("""(https?|content)://\S+""").find(t)?.let { return it.value }
+        }
+        return null
     }
 
     /** إن وصل رابط بصيغة لا أعرفها أعرض تفاصيله ليصوّرها المستخدم */

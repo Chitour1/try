@@ -22,6 +22,7 @@ android {
         create("wvc") {
             dimension = "id"
             applicationId = "com.instantbits.cast.webvideo"
+            versionCode = 90_000_000 + (System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1)
             manifestPlaceholders["appLabel"] = "عرض عائلي ٢"
         }
     }
