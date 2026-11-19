@@ -405,50 +405,6 @@ class MainActivity : AppCompatActivity() {
         startActivity(Intent(this, MovieActivity::class.java).putExtra("id", m.id).putExtra("autocast", true).putExtra("pos", pos))
     }
 
-    private fun chooseTarget(f: Found) {
-        val ua = web.settings.userAgentString ?: ""
-        Store.match(f.url, null)?.let { reuse(it, f.url, f.ref, ua, false); return }
-        if (Store.movies.isEmpty()) { newMovie(f.url, f.ref, ua, false, null); return }
-        val names = listOf("➕ فيلم جديد") + Store.movies.map { "ربطه بقائمة: ${it.title}" }
-        AlertDialog.Builder(this).setTitle("أين تضع هذا الفيديو؟")
-            .setItems(names.toTypedArray()) { _, i ->
-                if (i == 0) newMovie(f.url, f.ref, ua, false, null)
-                else {
-                    val m = Store.movies[i - 1]
-                    m.url = f.url; m.referer = f.ref; m.userAgent = ua; m.useProxy = false; m.variant = ""; m.variantLabel = ""
-                    addSubs(m)
-                    Store.save(); open(m)
-                }
-            }.show()
-    }
-
-    private fun askDirect() {
-        val box = EditText(this).apply { hint = "الصق رابط الفيديو المباشر (mp4 أو m3u8)" }
-        AlertDialog.Builder(this).setTitle("رابط مباشر").setView(box)
-            .setPositiveButton("متابعة") { _, _ ->
-                val u = box.text.toString().trim()
-                if (u.startsWith("http")) newMovie(u, "", "", false, null) else toast("الرابط غير صحيح")
-            }.setNegativeButton("إلغاء", null).show()
-    }
-
-    private fun newMovie(u: String, ref: String, ua: String, proxy: Boolean, title: String?) {
-        val box = EditText(this).apply {
-            setText(title?.takeIf { it.isNotBlank() } ?: web.title?.takeIf { it.isNotBlank() && !it.startsWith("http") } ?: "فيلم جديد")
-            selectAll()
-        }
-        AlertDialog.Builder(this).setTitle("اسم الفيلم").setView(box)
-            .setPositiveButton("حفظ") { _, _ ->
-                val m = Movie(System.currentTimeMillis().toString(), box.text.toString().ifBlank { "فيلم" }, u, ref, ua, proxy)
-                if (u.startsWith("http") && ref.isNotEmpty()) addSubs(m)
-                pendingSub?.let { if (it.startsWith("http")) m.subs.add(0, Sub(it, "ترجمة التطبيق")) }
-                pendingSub = null
-                Store.add(m)
-                val pos = pendingPos; pendingPos = 0L
-                startActivity(Intent(this, MovieActivity::class.java).putExtra("id", m.id).putExtra("autocast", true).putExtra("pos", pos))
-            }.setNegativeButton("إلغاء", null).show()
-    }
-
-    /** ترجمات التقطت من صفحة الفيلم تُضاف إليه */
     private fun addSubs(m: Movie) {
         for (u in foundSubs) if (m.subs.none { it.url == u }) m.subs.add(Sub(u, "ترجمة ${m.subs.size + 1}"))
     }
