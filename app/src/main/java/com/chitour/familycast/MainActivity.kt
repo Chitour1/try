@@ -29,6 +29,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var foundBtn: Button
     @Volatile private var pageUrl = ""
     private val found = LinkedHashMap<String, Found>()
+    private val foundSubs = mutableListOf<String>()
+    private var lastClip = ""
     private val pool = java.util.concurrent.Executors.newFixedThreadPool(3)
     private val handler = Handler(Looper.getMainLooper())
     private val scanLoop = object : Runnable {
@@ -67,6 +69,38 @@ class MainActivity : AppCompatActivity() {
 
         setupWeb()
         if (!handleShare(intent)) web.loadUrl("https://www.google.com")
+        showCrash()
+    }
+
+    /** إن توقف التطبيق في المرة السابقة أعرض السبب ليصوّره المستخدم */
+    private fun showCrash() {
+        val f = java.io.File(filesDir, "crash.txt")
+        if (!f.exists()) return
+        val t = try { f.readText().take(1500) } catch (e: Exception) { "" }
+        f.delete()
+        AlertDialog.Builder(this).setTitle("توقف التطبيق في المرة السابقة")
+            .setMessage("صوّر هذه الرسالة وأرسلها ليُصلح الخلل:\n\n$t")
+            .setPositiveButton("نسخ") { _, _ ->
+                (getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager)
+                    .setPrimaryClip(android.content.ClipData.newPlainText("crash", t)); toast("نُسخ")
+            }.setNegativeButton("إغلاق", null).show()
+    }
+
+    /** إن كان في الحافظة رابط فيديو منسوخ (من تطبيق أفلام مثلًا) أعرضه */
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (!hasFocus) return
+        try {
+            val cm = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
+            val t = cm.primaryClip?.getItemAt(0)?.coerceToText(this)?.toString() ?: return
+            val u = Regex("""https?://\S+""").find(t)?.value ?: return
+            if (u == lastClip || !Util.isVideoUrl(u)) return
+            lastClip = u
+            AlertDialog.Builder(this).setTitle("رابط فيديو منسوخ")
+                .setMessage("وجدت في الحافظة رابط فيديو. أأعرضه على التلفاز؟")
+                .setPositiveButton("نعم") { _, _ -> newMovie(u, "", "", false, null) }
+                .setNegativeButton("لا", null).show()
+        } catch (e: Exception) { }
     }
 
     override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); handleShare(intent) }
@@ -116,7 +150,7 @@ class MainActivity : AppCompatActivity() {
         val u = url!!
         if (u.startsWith("http") && !Util.isVideoUrl(u) && i.type?.startsWith("video") != true &&
             i.action == Intent.ACTION_SEND) { web.loadUrl(u); return true }
-        val needProxy = ref.isNotEmpty() || ua.isNotEmpty() || u.lowercase().contains("m3u8")
+        val needProxy = ref.isNotEmpty()
         newMovie(u, ref, ua, needProxy, title)
         return true
     }
@@ -136,18 +170,46 @@ class MainActivity : AppCompatActivity() {
             javaScriptEnabled = true
             domStorageEnabled = true
             mediaPlaybackRequiresUserGesture = false
-            setSupportMultipleWindows(false)
+            setSupportMultipleWindows(true)
             javaScriptCanOpenWindowsAutomatically = false
             loadWithOverviewMode = true
             useWideViewPort = true
             builtInZoomControls = true
             displayZoomControls = false
         }
-        web.webChromeClient = WebChromeClient()
+        web.webChromeClient = object : WebChromeClient() {
+            // النوافذ المنبثقة: لا تُفتح إلا بلمسة من المستخدم، وتُحجب إن كانت إعلانًا
+            override fun onCreateWindow(view: WebView, isDialog: Boolean, isUserGesture: Boolean, resultMsg: android.os.Message): Boolean {
+                if (!isUserGesture) return false
+                val tmp = WebView(this@MainActivity)
+                tmp.webViewClient = object : WebViewClient() {
+                    var handled = false
+                    fun take(v: WebView, u: String) {
+                        if (handled) return
+                        handled = true
+                        if (!Util.isAd(u) && u.startsWith("http")) web.loadUrl(u)
+                        handler.post { try { v.stopLoading(); v.destroy() } catch (e: Exception) { } }
+                    }
+                    override fun shouldOverrideUrlLoading(v: WebView, r: WebResourceRequest): Boolean { take(v, r.url.toString()); return true }
+                    override fun onPageStarted(v: WebView, url: String, favicon: Bitmap?) { take(v, url) }
+                }
+                (resultMsg.obj as? WebView.WebViewTransport)?.webView = tmp
+                resultMsg.sendToTarget()
+                return true
+            }
+        }
         web.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                 val s = request.url.scheme ?: ""
-                return !(s == "http" || s == "https")
+                if (!(s == "http" || s == "https")) return true
+                val u = request.url.toString()
+                if (Util.isAd(u)) return true
+                if (request.isForMainFrame && !request.hasGesture() && !request.isRedirect) {
+                    val cur = try { Uri.parse(pageUrl).host ?: "" } catch (e: Exception) { "" }
+                    val nxt = request.url.host ?: ""
+                    if (cur.isNotEmpty() && baseDomain(cur) != baseDomain(nxt)) return true
+                }
+                return false
             }
             override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
                 pageUrl = url; urlBox.setText(url)
@@ -155,13 +217,34 @@ class MainActivity : AppCompatActivity() {
             override fun onPageFinished(view: WebView, url: String) { scanDom() }
             override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
                 val u = request.url.toString()
-                if (Util.isVideoUrl(u)) {
-                    val ref = request.requestHeaders["Referer"] ?: request.requestHeaders["referer"] ?: pageUrl
-                    runOnUiThread { addFound(u, ref) }
-                }
+                if (Util.isAd(u)) return WebResourceResponse("text/plain", "utf-8", java.io.ByteArrayInputStream(ByteArray(0)))
+                val ref = request.requestHeaders["Referer"] ?: request.requestHeaders["referer"] ?: pageUrl
+                if (Util.isVideoUrl(u)) runOnUiThread { addFound(u, ref) }
+                else if (Util.isSubUrl(u)) runOnUiThread { if (!foundSubs.contains(u)) foundSubs.add(u) }
                 return null
             }
+            // إذا تعطلت الصفحة لا يُغلق التطبيق، بل تُعاد الصفحة
+            override fun onRenderProcessGone(view: WebView, detail: android.webkit.RenderProcessGoneDetail): Boolean {
+                handler.post { recreateWeb() }
+                return true
+            }
         }
+    }
+
+    private fun baseDomain(h: String): String = h.split('.').takeLast(2).joinToString(".")
+
+    private fun recreateWeb() {
+        try {
+            val parent = web.parent as android.widget.LinearLayout
+            val idx = parent.indexOfChild(web)
+            parent.removeView(web)
+            try { web.destroy() } catch (e: Exception) { }
+            web = WebView(this)
+            setupWeb()
+            parent.addView(web, idx, android.widget.LinearLayout.LayoutParams(-1, 0, 1f))
+            web.loadUrl(pageUrl.ifBlank { "https://www.google.com" })
+            toast("تعطلت الصفحة فأعدت تحميلها")
+        } catch (e: Exception) { }
     }
 
     private fun scanDom() {
@@ -209,20 +292,21 @@ class MainActivity : AppCompatActivity() {
         val names = list.map { f -> (if (f === b) "⭐ الأرجح أنه الفيلم\n" else "") + f.describe() }
         AlertDialog.Builder(this).setTitle("اختر الفيديو (الأطول أولًا)")
             .setItems(names.toTypedArray()) { _, i -> chooseTarget(list[i]) }
-            .setNeutralButton("مسح القائمة") { _, _ -> found.clear(); announced = false; updateFoundBtn() }
+            .setNeutralButton("مسح القائمة") { _, _ -> found.clear(); foundSubs.clear(); announced = false; updateFoundBtn() }
             .show()
     }
 
     private fun chooseTarget(f: Found) {
         val ua = web.settings.userAgentString ?: ""
-        if (Store.movies.isEmpty()) { newMovie(f.url, f.ref, ua, true, null); return }
+        if (Store.movies.isEmpty()) { newMovie(f.url, f.ref, ua, false, null); return }
         val names = listOf("➕ فيلم جديد") + Store.movies.map { "ربطه بقائمة: ${it.title}" }
         AlertDialog.Builder(this).setTitle("أين تضع هذا الفيديو؟")
             .setItems(names.toTypedArray()) { _, i ->
-                if (i == 0) newMovie(f.url, f.ref, ua, true, null)
+                if (i == 0) newMovie(f.url, f.ref, ua, false, null)
                 else {
                     val m = Store.movies[i - 1]
-                    m.url = f.url; m.referer = f.ref; m.userAgent = ua; m.useProxy = true
+                    m.url = f.url; m.referer = f.ref; m.userAgent = ua; m.useProxy = false; m.variant = ""; m.variantLabel = ""
+                    addSubs(m)
                     Store.save(); open(m)
                 }
             }.show()
@@ -233,7 +317,7 @@ class MainActivity : AppCompatActivity() {
         AlertDialog.Builder(this).setTitle("رابط مباشر").setView(box)
             .setPositiveButton("متابعة") { _, _ ->
                 val u = box.text.toString().trim()
-                if (u.startsWith("http")) newMovie(u, "", "", u.lowercase().contains("m3u8"), null) else toast("الرابط غير صحيح")
+                if (u.startsWith("http")) newMovie(u, "", "", false, null) else toast("الرابط غير صحيح")
             }.setNegativeButton("إلغاء", null).show()
     }
 
@@ -245,8 +329,14 @@ class MainActivity : AppCompatActivity() {
         AlertDialog.Builder(this).setTitle("اسم الفيلم").setView(box)
             .setPositiveButton("حفظ") { _, _ ->
                 val m = Movie(System.currentTimeMillis().toString(), box.text.toString().ifBlank { "فيلم" }, u, ref, ua, proxy)
+                if (u.startsWith("http") && ref.isNotEmpty()) addSubs(m)
                 Store.add(m); open(m)
             }.setNegativeButton("إلغاء", null).show()
+    }
+
+    /** ترجمات التقطت من صفحة الفيلم تُضاف إليه */
+    private fun addSubs(m: Movie) {
+        for (u in foundSubs) if (m.subs.none { it.url == u }) m.subs.add(Sub(u, "ترجمة ${m.subs.size + 1}"))
     }
 
     private fun open(m: Movie) = startActivity(Intent(this, MovieActivity::class.java).putExtra("id", m.id).putExtra("autocast", true))
@@ -254,7 +344,7 @@ class MainActivity : AppCompatActivity() {
     private fun go() {
         var t = urlBox.text.toString().trim()
         if (t.isEmpty()) return
-        if (Util.isVideoUrl(t)) { newMovie(t, "", "", t.lowercase().contains("m3u8"), null); return }
+        if (Util.isVideoUrl(t)) { newMovie(t, "", "", false, null); return }
         if (!t.startsWith("http")) {
             t = if (t.contains('.') && !t.contains(' ')) "https://$t"
                 else "https://www.google.com/search?q=" + Uri.encode(t)
@@ -264,6 +354,8 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() { super.onResume(); handler.postDelayed(scanLoop, 3000) }
     override fun onPause() { super.onPause(); handler.removeCallbacks(scanLoop) }
+
+    override fun onDestroy() { pool.shutdownNow(); super.onDestroy() }
 
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {

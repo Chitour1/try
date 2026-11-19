@@ -54,6 +54,22 @@ object Probe {
         return t to c.url.toString()
     }
 
+    /** جودات البث المتاحة في رابط HLS الرئيسي: (الوصف، الرابط) */
+    fun variants(u: String, ref: String, ua: String): List<Pair<String, String>> {
+        val (t, base) = text(u, ref, ua)
+        val out = mutableListOf<Pair<String, String>>()
+        val lines = t.lines().map { it.trim() }
+        for ((i, l) in lines.withIndex()) {
+            if (!l.startsWith("#EXT-X-STREAM-INF")) continue
+            val next = lines.drop(i + 1).firstOrNull { it.isNotEmpty() && !it.startsWith("#") } ?: continue
+            val res = Regex("""RESOLUTION=\d+x(\d+)""").find(l)?.groupValues?.get(1)
+            val bw = Regex("""BANDWIDTH=(\d+)""").find(l)?.groupValues?.get(1)?.toLongOrNull()
+            val label = (if (res != null) "${res}p" else "جودة") + (if (bw != null) "  (${bw / 1000} ك.ب/ث)" else "")
+            out.add(label to URL(URL(base), next).toString())
+        }
+        return out.sortedByDescending { Regex("""^(\d+)p""").find(it.first)?.groupValues?.get(1)?.toIntOrNull() ?: 0 }
+    }
+
     fun run(f: Found, ua: String) {
         try {
             if (f.url.lowercase().contains("m3u8")) {

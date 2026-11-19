@@ -7,6 +7,8 @@ import org.json.JSONObject
 import java.util.Locale
 import kotlin.math.max
 
+data class Sub(var url: String, var label: String)
+
 data class Segment(var start: Double, var end: Double, var mute: Boolean = false, var note: String = "")
 
 class Movie(
@@ -16,13 +18,20 @@ class Movie(
     var referer: String = "",
     var userAgent: String = "",
     var useProxy: Boolean = false,
-    val segments: MutableList<Segment> = mutableListOf()
+    val segments: MutableList<Segment> = mutableListOf(),
+    val subs: MutableList<Sub> = mutableListOf(),
+    var subsOn: Boolean = true,
+    var variant: String = "",
+    var variantLabel: String = ""
 )
 
 object Store {
     private lateinit var prefs: SharedPreferences
     val movies = mutableListOf<Movie>()
     var skipEnabled = true
+    var subScale: Float
+        get() = prefs.getFloat("subScale", 1.3f)
+        set(v) { prefs.edit().putFloat("subScale", v).apply() }
 
     fun init(ctx: Context) {
         prefs = ctx.getSharedPreferences("family_cast", Context.MODE_PRIVATE)
@@ -41,6 +50,10 @@ object Store {
                 val s = sa.getJSONObject(j)
                 m.segments.add(Segment(s.optDouble("s"), s.optDouble("e"), s.optBoolean("m"), s.optString("n")))
             }
+            val ua = o.optJSONArray("subs") ?: JSONArray()
+            for (j in 0 until ua.length()) { val x = ua.getJSONObject(j); m.subs.add(Sub(x.optString("u"), x.optString("l"))) }
+            m.subsOn = o.optBoolean("subsOn", true)
+            m.variant = o.optString("variant"); m.variantLabel = o.optString("variantLabel")
             movies.add(m)
         }
     }
@@ -50,7 +63,9 @@ object Store {
         for (m in movies) {
             val sa = JSONArray()
             for (s in m.segments) sa.put(JSONObject().put("s", s.start).put("e", s.end).put("m", s.mute).put("n", s.note))
-            arr.put(JSONObject().put("id", m.id).put("title", m.title).put("url", m.url)
+            val ua = JSONArray()
+            for (x in m.subs) ua.put(JSONObject().put("u", x.url).put("l", x.label))
+            arr.put(JSONObject().put("subs", ua).put("subsOn", m.subsOn).put("variant", m.variant).put("variantLabel", m.variantLabel).put("id", m.id).put("title", m.title).put("url", m.url)
                 .put("referer", m.referer).put("ua", m.userAgent).put("proxy", m.useProxy).put("segments", sa))
         }
         prefs.edit().putString("movies", arr.toString()).apply()
@@ -140,6 +155,33 @@ object Util {
 
     fun segmentsToText(list: List<Segment>) = list.joinToString("\n") {
         "${fmt(it.start)} - ${fmt(it.end)} ${if (it.mute) "كتم" else "تجاوز"}" + (if (it.note.isNotBlank()) " ${it.note}" else "")
+    }
+
+    fun isSubUrl(u: String): Boolean =
+        u.lowercase().startsWith("http") && Regex("""\.(vtt|srt)(\?|#|$)""").containsMatchIn(u.lowercase())
+
+    fun decodeText(b: ByteArray): String {
+        if (b.size >= 2 && b[0] == 0xFF.toByte() && b[1] == 0xFE.toByte()) return String(b, Charsets.UTF_16LE)
+        if (b.size >= 2 && b[0] == 0xFE.toByte() && b[1] == 0xFF.toByte()) return String(b, Charsets.UTF_16BE)
+        val utf = String(b, Charsets.UTF_8)
+        return if (utf.contains('\uFFFD')) String(b, charset("windows-1256")) else utf.removePrefix("\uFEFF")
+    }
+
+    fun toVtt(s: String): String {
+        val t = s.replace("\r", "").removePrefix("\uFEFF")
+        if (t.trimStart().startsWith("WEBVTT")) return t
+        return "WEBVTT\n\n" + t.replace(Regex("""(\d{1,2}:\d{2}:\d{2}),(\d{1,3})"""), "$1.$2")
+    }
+
+    private val adHosts = listOf("doubleclick", "googlesyndication", "googleadservices", "adservice", "popads", "popcash",
+        "propellerads", "adsterra", "exoclick", "juicyads", "onclickads", "hilltopads", "a-ads.", "mgid.", "taboola",
+        "outbrain", "revcontent", "adnxs", "clickadu", "trafficjunky", "pushame", "notix", "highperformanceformat",
+        "profitableratecpm", "realsrv", "displayvertising", "popunder", "adcash", "admaven", "ad-maven", "clickaine",
+        "monetag", "onclkds", "bidgear", "adskeeper", "yllix", "galaksion", "richpush", "pushnami", "evadav")
+
+    fun isAd(u: String): Boolean {
+        val h = try { java.net.URL(u).host.lowercase() } catch (e: Exception) { return false }
+        return adHosts.any { h.contains(it) }
     }
 
     fun isVideoUrl(u: String): Boolean {

@@ -59,6 +59,13 @@ object Proxy {
 
     fun q(target: String, ref: String, ua: String) = "u=${enc(target)}&r=${enc(ref)}&a=${enc(ua)}"
 
+    /** رابط ترجمة يقرؤه التلفاز (يُحوَّل srt إلى vtt) */
+    fun subUrl(src: String, ref: String, ua: String): String? {
+        val ip = localIp() ?: return null
+        val port = ensure()
+        return "http://$ip:$port/t.vtt?${q(src, ref, ua)}"
+    }
+
     fun wrap(target: String, ref: String, ua: String): String? {
         val ip = localIp() ?: return null
         val port = ensure()
@@ -88,6 +95,9 @@ object Proxy {
             if (session.uri.startsWith("/f/")) return try { serveLocal(session) } catch (e: Exception) {
                 cors(NanoHTTPD.newFixedLengthResponse(Response.Status.INTERNAL_ERROR, "text/plain", e.toString()))
             }
+            if (session.uri.startsWith("/t")) return try { serveSub(session) } catch (e: Exception) {
+                cors(NanoHTTPD.newFixedLengthResponse(Response.Status.INTERNAL_ERROR, "text/plain", e.toString()))
+            }
             return try {
                 val p = session.parameters
                 val u = p["u"]?.firstOrNull()
@@ -101,14 +111,43 @@ object Proxy {
             }
         }
 
+        private fun serveSub(session: IHTTPSession): Response {
+            val p = session.parameters
+            val src = Proxy.dec(p["u"]?.firstOrNull() ?: "")
+            val ref = p["r"]?.firstOrNull()?.let { Proxy.dec(it) } ?: ""
+            val ua = p["a"]?.firstOrNull()?.let { Proxy.dec(it) } ?: ""
+            val bytes = if (src.startsWith("http")) {
+                val c = open(src, ref, ua, null)
+                c.inputStream.use { it.readBytes() }
+            } else java.io.File(android.net.Uri.parse(src).path ?: src).readBytes()
+            val vtt = Util.toVtt(Util.decodeText(bytes))
+            return cors(NanoHTTPD.newFixedLengthResponse(Response.Status.OK, "text/vtt; charset=utf-8", vtt))
+        }
+
+        private fun open(target: String, ref: String, ua: String, range: String?): HttpURLConnection {
+            var last: Exception? = null
+            for (attempt in 0 until 3) {
+                try {
+                    val c = URL(target).openConnection() as HttpURLConnection
+                    c.instanceFollowRedirects = true
+                    c.connectTimeout = 20000
+                    c.readTimeout = 60000
+                    if (ref.isNotEmpty()) c.setRequestProperty("Referer", ref)
+                    c.setRequestProperty("User-Agent", ua.ifEmpty { "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/124 Mobile Safari/537.36" })
+                    if (range != null) c.setRequestProperty("Range", range)
+                    val code = c.responseCode
+                    if (code >= 500 && attempt < 2) { c.disconnect(); Thread.sleep(700L * (attempt + 1)); continue }
+                    return c
+                } catch (e: Exception) {
+                    last = e
+                    Thread.sleep(700L * (attempt + 1))
+                }
+            }
+            throw last ?: java.io.IOException("failed")
+        }
+
         private fun fetch(session: IHTTPSession, target: String, ref: String, ua: String): Response {
-            val c = URL(target).openConnection() as HttpURLConnection
-            c.instanceFollowRedirects = true
-            c.connectTimeout = 15000
-            c.readTimeout = 30000
-            if (ref.isNotEmpty()) c.setRequestProperty("Referer", ref)
-            c.setRequestProperty("User-Agent", ua.ifEmpty { "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/124 Mobile Safari/537.36" })
-            session.headers["range"]?.let { c.setRequestProperty("Range", it) }
+            val c = open(target, ref, ua, session.headers["range"])
             val code = c.responseCode
             val ctype = c.contentType ?: ""
             val isList = target.lowercase().contains("m3u8") || ctype.lowercase().contains("mpegurl")
@@ -117,9 +156,12 @@ object Proxy {
                 val out = rewrite(text, c.url.toString(), ref, ua)
                 return cors(NanoHTTPD.newFixedLengthResponse(Response.Status.OK, "application/vnd.apple.mpegurl", out))
             }
-            val stream = if (code >= 400) (c.errorStream ?: ByteArrayInputStream(ByteArray(0))) else c.inputStream
+            val stream = if (code >= 400) (c.errorStream ?: ByteArrayInputStream(ByteArray(0))) else java.io.BufferedInputStream(c.inputStream, 256 * 1024)
             val len = c.getHeaderField("Content-Length")?.toLongOrNull() ?: -1L
-            val mime = ctype.ifBlank { Util.mimeOf(target) }
+            val mime = when {
+                session.uri.startsWith("/s") && (ctype.startsWith("image") || ctype.startsWith("text") || ctype.isBlank() || session.uri.contains(".ts")) -> "video/mp2t"
+                else -> ctype.ifBlank { Util.mimeOf(target) }
+            }
             val r = if (len >= 0) NanoHTTPD.newFixedLengthResponse(status(code), mime, stream, len)
                     else NanoHTTPD.newChunkedResponse(status(code), mime, stream)
             c.getHeaderField("Content-Range")?.let { r.addHeader("Content-Range", it) }
