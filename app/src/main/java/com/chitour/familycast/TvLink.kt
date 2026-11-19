@@ -30,7 +30,67 @@ object TvLink {
         val h = Store.pref("tvHost"); if (h.isBlank()) return null
         return Rx(Store.pref("rxName").ifBlank { "التلفاز" }, h, Store.pref("tvPort").toIntOrNull() ?: ReceiverService.PORT)
     }
-    fun useTv(): Boolean = target() == "tv" && selected() != null
+    /** المفضّل دائمًا تطبيق الاستقبال على التلفاز، إلا إذا اختار المستخدم Chromecast صراحة */
+    fun preferTv(): Boolean = target() != "cast"
+    fun useTv(): Boolean = preferTv() && selected() != null
+
+    private fun info(host: String, port: Int, cto: Int, rto: Int): Rx? = try {
+        val c = URL("http://$host:$port/info").openConnection() as HttpURLConnection
+        c.connectTimeout = cto; c.readTimeout = rto
+        if (c.responseCode == 200) {
+            val o = JSONObject(c.inputStream.bufferedReader().use { it.readText() })
+            if (o.optString("app") == "familycast") Rx(o.optString("name", "التلفاز"), host, port) else null
+        } else null
+    } catch (e: Exception) { null }
+
+    @Volatile var scanning = false
+
+    /** بحث مباشر في الشبكة المنزلية عن التلفاز (لا يعتمد على خدمة الاكتشاف التي تحجبها بعض الموجّهات) */
+    fun scan(done: (() -> Unit)? = null) {
+        if (scanning) { done?.let { main.postDelayed({ it() }, 3000) }; return }
+        val ip = Proxy.localIp() ?: run { done?.invoke(); return }
+        val prefix = ip.substringBeforeLast('.')
+        scanning = true
+        Thread {
+            val pool = java.util.concurrent.Executors.newFixedThreadPool(48)
+            for (i in 1..254) {
+                val host = "$prefix.$i"
+                if (host == ip) continue
+                pool.execute {
+                    info(host, ReceiverService.PORT, 600, 1200)?.let { rx -> main.post { found[rx.name] = rx; onChange?.invoke() } }
+                }
+            }
+            pool.shutdown()
+            try { pool.awaitTermination(8, java.util.concurrent.TimeUnit.SECONDS) } catch (e: Exception) { }
+            scanning = false
+            main.post { done?.invoke() }
+        }.start()
+    }
+
+    /** يتأكد من وجود التلفاز قبل الإرسال: العنوان المحفوظ أولًا، ثم الاكتشاف والبحث */
+    fun ensure(ctx: Context, cb: (Rx?) -> Unit) {
+        start(ctx)
+        val sel = selected()
+        Thread {
+            val ok = sel?.let { info(it.host, it.port, 1500, 2000) }
+            main.post {
+                if (ok != null) { select(ok); cb(ok); return@post }
+                found.values.firstOrNull()?.let { rx ->
+                    Thread { val r = info(rx.host, rx.port, 1500, 2000); main.post { if (r != null) { select(r); cb(r) } else scanThen(cb) } }.start()
+                    return@post
+                }
+                scanThen(cb)
+            }
+        }.start()
+    }
+
+    private fun scanThen(cb: (Rx?) -> Unit) {
+        scan {
+            val rx = found.values.firstOrNull()
+            if (rx != null) select(rx)
+            cb(rx)
+        }
+    }
 
     fun select(rx: Rx) {
         Store.setPref("target", "tv"); Store.setPref("tvHost", rx.host)
@@ -72,7 +132,7 @@ object TvLink {
                             found[si.serviceName] = rx
                             // إن تغيّر عنوان التلفاز المختار نحدّثه تلقائيًا
                             if (Store.pref("rxName") == rx.name && Store.pref("tvHost") != host) Store.setPref("tvHost", host)
-                            if (target().isBlank()) select(rx)
+                            if (preferTv() && selected() == null) select(rx)
                             onChange?.invoke()
                         }
                         resolving = false; next()

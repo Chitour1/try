@@ -244,6 +244,7 @@ class App : Application() {
         Store.init(this)
         Proxy.ctx = applicationContext
         CastCtl.app = applicationContext
+        if (!isTv()) TvLink.start(this) else ReceiverService.start(this)
         try {
             val sm = CastContext.getSharedInstance(this).sessionManager
             sm.addSessionManagerListener(object : SessionManagerListener<CastSession> {

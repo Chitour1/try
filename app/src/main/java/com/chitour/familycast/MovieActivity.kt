@@ -443,33 +443,52 @@ class MovieActivity : AppCompatActivity() {
         return l.optString("id") == movie.id && l.optString("state") != "idle"
     }
 
+    private var tvChecked = false
+
+    private fun notFound() {
+        statusText.text = "لم أجد تطبيق الاستقبال على التلفاز"
+        AlertDialog.Builder(this).setTitle("لم أجد التلفاز")
+            .setMessage("افتح تطبيق «عرض عائلي» على التلفاز حتى تظهر شاشة «جهاز الاستقبال جاهز»، وتأكد أن الهاتف والتلفاز على شبكة Wi-Fi نفسها، ثم أعد المحاولة.\n\nإن لم ينجح البحث، فاكتب العنوان الظاهر على شاشة التلفاز.")
+            .setPositiveButton("أعد البحث") { _, _ -> castNow() }
+            .setNeutralButton("كتابة العنوان") { _, _ -> manualAddress(thenCast = true) }
+            .setNegativeButton("عبر Chromecast") { _, _ -> TvLink.selectCast(); refreshDevice(); castNow() }
+            .show()
+    }
+
     private fun refreshDevice() {
         if (!built) return
-        deviceText.text = if (TvLink.useTv()) "الجهاز: ${TvLink.selected()?.name} (تطبيق الاستقبال)"
-                          else "الجهاز: Chromecast (أيقونة البث)"
+        deviceText.text = when {
+            !TvLink.preferTv() -> "الجهاز: Chromecast (أيقونة البث)"
+            TvLink.selected() != null -> "الجهاز: ${TvLink.selected()?.name} (تطبيق الاستقبال)"
+            else -> "الجهاز: تطبيق الاستقبال على التلفاز (يُبحث عنه)"
+        }
     }
 
     private fun chooseDevice() {
         val rxs = TvLink.found.values.toList()
-        val names = rxs.map { "📺 ${it.name}" } + listOf("Chromecast (أيقونة البث)", "إدخال عنوان التلفاز يدويًا")
+        val names = rxs.map { "📺 ${it.name} (${it.host})" } + listOf("🔍 ابحث عن التلفاز من جديد", "Chromecast (أيقونة البث)", "إدخال عنوان التلفاز يدويًا")
         AlertDialog.Builder(this).setTitle(if (rxs.isEmpty()) "لم أجد تطبيق الاستقبال بعد — افتحه على التلفاز" else "اختر الجهاز")
             .setItems(names.toTypedArray()) { _, i ->
                 when {
                     i < rxs.size -> { TvLink.select(rxs[i]); phoneDetached = false; refreshDevice() }
-                    i == rxs.size -> { TvLink.selectCast(); refreshDevice() }
+                    i == rxs.size -> {
+                        statusText.text = "أبحث في الشبكة…"
+                        TvLink.scan { statusText.text = if (TvLink.found.isEmpty()) "لم أجد تطبيق الاستقبال" else "وجدت: " + TvLink.found.keys.joinToString("، "); chooseDevice() }
+                    }
+                    i == rxs.size + 1 -> { TvLink.selectCast(); refreshDevice() }
                     else -> manualAddress()
                 }
             }.show()
     }
 
-    private fun manualAddress() {
+    private fun manualAddress(thenCast: Boolean = false) {
         val box = EditText(this).apply { hint = "مثل 192.168.1.50 (يظهر على شاشة التلفاز)"; inputType = InputType.TYPE_CLASS_PHONE }
         AlertDialog.Builder(this).setTitle("عنوان التلفاز").setView(box)
             .setPositiveButton("اتصال") { _, _ ->
                 val h = box.text.toString().trim()
                 TvLink.probe(h) { rx ->
                     if (rx == null) toast("لم أصل إلى التلفاز على هذا العنوان. تأكد أن «عرض عائلي» مفتوح عليه")
-                    else { TvLink.select(rx); phoneDetached = false; refreshDevice(); toast("اتصلت بـ «${rx.name}»") }
+                    else { TvLink.select(rx); phoneDetached = false; refreshDevice(); toast("اتصلت بـ «${rx.name}»"); if (thenCast) castNow() }
                 }
             }.setNegativeButton("إلغاء", null).show()
     }
@@ -482,6 +501,14 @@ class MovieActivity : AppCompatActivity() {
 
     private fun castNow() {
         saveFields()
+        if (TvLink.preferTv() && !tvChecked) {
+            statusText.text = "أبحث عن تطبيق الاستقبال على التلفاز…"
+            TvLink.ensure(this) { rx ->
+                if (rx != null) { tvChecked = true; refreshDevice(); castNow(); tvChecked = false }
+                else notFound()
+            }
+            return
+        }
         if (TvLink.useTv()) {
             phoneDetached = false
             val l = TvLink.last
