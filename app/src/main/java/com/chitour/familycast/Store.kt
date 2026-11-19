@@ -22,7 +22,10 @@ class Movie(
     val subs: MutableList<Sub> = mutableListOf(),
     var subsOn: Boolean = true,
     var variant: String = "",
-    var variantLabel: String = ""
+    var variantLabel: String = "",
+    var pos: Long = 0L,
+    var dur: Long = 0L,
+    var watchedAt: Long = 0L
 )
 
 object Store {
@@ -54,6 +57,7 @@ object Store {
             for (j in 0 until ua.length()) { val x = ua.getJSONObject(j); m.subs.add(Sub(x.optString("u"), x.optString("l"))) }
             m.subsOn = o.optBoolean("subsOn", true)
             m.variant = o.optString("variant"); m.variantLabel = o.optString("variantLabel")
+            m.pos = o.optLong("pos"); m.dur = o.optLong("dur"); m.watchedAt = o.optLong("watchedAt", o.optString("id").toLongOrNull() ?: 0L)
             movies.add(m)
         }
     }
@@ -65,14 +69,43 @@ object Store {
             for (s in m.segments) sa.put(JSONObject().put("s", s.start).put("e", s.end).put("m", s.mute).put("n", s.note))
             val ua = JSONArray()
             for (x in m.subs) ua.put(JSONObject().put("u", x.url).put("l", x.label))
-            arr.put(JSONObject().put("subs", ua).put("subsOn", m.subsOn).put("variant", m.variant).put("variantLabel", m.variantLabel).put("id", m.id).put("title", m.title).put("url", m.url)
+            arr.put(JSONObject().put("subs", ua).put("subsOn", m.subsOn).put("variant", m.variant).put("variantLabel", m.variantLabel).put("pos", m.pos).put("dur", m.dur).put("watchedAt", m.watchedAt).put("id", m.id).put("title", m.title).put("url", m.url)
                 .put("referer", m.referer).put("ua", m.userAgent).put("proxy", m.useProxy).put("segments", sa))
         }
         prefs.edit().putString("movies", arr.toString()).apply()
     }
 
     fun get(id: String) = movies.firstOrNull { it.id == id }
-    fun add(m: Movie) { movies.add(0, m); save() }
+
+    fun pref(k: String): String = prefs.getString(k, "") ?: ""
+    fun setPref(k: String, v: String) { prefs.edit().putString(k, v).apply() }
+
+    private fun norm(u: String) = u.substringBefore('?').substringBefore('#').trimEnd('/').lowercase()
+    private fun normTitle(t: String) = t.trim().lowercase().replace(Regex("""\s+"""), " ")
+
+    /** يجد الفيلم المحفوظ نفسه حين يصل مرة أخرى (بالرابط أو بالاسم) حتى لا تضيع قائمته ومكان توقفه */
+    fun match(url: String, title: String?): Movie? {
+        movies.firstOrNull { it.url == url }?.let { return it }
+        val t = title?.let { normTitle(it) }
+        if (!t.isNullOrBlank() && t != "فيلم جديد" && t != "فيلم") movies.firstOrNull { normTitle(it.title) == t }?.let { return it }
+        val n = norm(url)
+        if (n.length > 20) movies.firstOrNull { norm(it.url) == n }?.let { return it }
+        return null
+    }
+
+    /** يحفظ مكان التوقف (كل بضع ثوانٍ) */
+    fun savePos(m: Movie, pos: Long, dur: Long) {
+        if (pos <= 0) return
+        m.pos = pos; if (dur > 0) m.dur = dur
+        m.watchedAt = System.currentTimeMillis()
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (now - lastPosSave > 5000) { lastPosSave = now; save() }
+    }
+    private var lastPosSave = 0L
+
+    /** نقطة الإكمال: لا نكمل من أول دقيقة ولا من آخر دقيقتين */
+    fun resumeAt(m: Movie): Long = if (m.pos > 60_000 && (m.dur <= 0 || m.pos < m.dur - 120_000)) m.pos - 5_000 else 0L
+    fun add(m: Movie) { m.watchedAt = System.currentTimeMillis(); movies.add(0, m); save() }
     fun remove(m: Movie) { movies.remove(m); save() }
 }
 

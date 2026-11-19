@@ -48,6 +48,9 @@ class MovieActivity : AppCompatActivity() {
     private lateinit var subBox: LinearLayout
     private lateinit var posText: TextView
     private lateinit var statusText: TextView
+    private lateinit var deviceText: TextView
+    private var tickN = 0
+    private var phoneDetached = false
     private lateinit var nextText: TextView
     private lateinit var volText: TextView
     private lateinit var qualityBtn: Button
@@ -117,6 +120,11 @@ class MovieActivity : AppCompatActivity() {
         castRow.add(route)
         castRow.add(label("← أيقونة البث: اضغطها واختر التلفاز", 13f), 1f)
         col.add(castRow)
+        val devRow = hbox().apply { gravity = Gravity.CENTER_VERTICAL }
+        deviceText = label("", 15f, true)
+        devRow.add(deviceText, 1f)
+        devRow.add(btn("📺 الجهاز") { chooseDevice() })
+        col.add(devRow)
         statusText = label("", 14f, true).apply { setTextColor(Color.parseColor("#0E5A6B")) }
         col.add(statusText)
 
@@ -174,6 +182,10 @@ class MovieActivity : AppCompatActivity() {
         r3.add(qualityBtn, 1f)
         r3.add(btn("⏹ إيقاف العرض") { stopAll() }, 1f)
         col.add(r3)
+        val r4 = hbox()
+        r4.add(btn("🔌 فصل الهاتف (يكمل التلفاز)") { detachPhone() }, 1.4f)
+        r4.add(btn("🔗 وصل التحكم") { phoneDetached = false; TvLink.poll { }; statusText.text = "عاد التحكم من الهاتف" }, 1f)
+        col.add(r4)
         nextText = label("", 13f)
         col.add(nextText)
 
@@ -184,7 +196,7 @@ class MovieActivity : AppCompatActivity() {
 
         val sw = SwitchCompat(this).apply {
             text = "التجاوز مفعّل"; isChecked = Store.skipEnabled; textSize = 16f
-            setOnCheckedChangeListener { _, c -> Store.skipEnabled = c }
+            setOnCheckedChangeListener { _, c -> Store.skipEnabled = c; if (tvActive()) TvLink.cmd("skip", "on" to c) }
         }
         col.add(sw)
 
@@ -205,7 +217,7 @@ class MovieActivity : AppCompatActivity() {
         col.add(label("الترجمة", 17f, true))
         val subSw = SwitchCompat(this).apply {
             text = "إظهار الترجمة على التلفاز"; isChecked = movie.subsOn; textSize = 15f
-            setOnCheckedChangeListener { _, c -> movie.subsOn = c; Store.save(); if (casting()) CastCtl.setSubs(c) }
+            setOnCheckedChangeListener { _, c -> movie.subsOn = c; Store.save(); if (tvActive()) TvLink.cmd("subs", "on" to c, "scale" to Store.subScale.toDouble()) else if (casting()) CastCtl.setSubs(c) }
         }
         col.add(subSw)
         subBox = vbox()
@@ -238,6 +250,7 @@ class MovieActivity : AppCompatActivity() {
 
     // ---------- المقاطع ----------
     private fun refreshSegs() {
+        if (built && tvActive()) TvLink.post("/cmd", org.json.JSONObject().put("a", "segments").put("id", movie.id).put("list", TvLink.segJson(movie)))
         movie.segments.sortBy { it.start }
         segBox.removeAllViews()
         if (movie.segments.isEmpty()) { segBox.add(label("لا مقاطع بعد.", 14f)); return }
@@ -367,12 +380,23 @@ class MovieActivity : AppCompatActivity() {
 
     private fun subScale(d: Float) {
         Store.subScale = (Store.subScale + d).coerceIn(0.6f, 2.5f)
-        CastCtl.restyleSubs()
+        if (tvActive()) TvLink.cmd("subscale", "v" to Store.subScale.toDouble()) else CastCtl.restyleSubs()
         toast("حجم الخط: ${(Store.subScale * 100).toInt()}٪")
     }
 
     // ---------- الجودة ----------
     private fun chooseQuality() {
+        if (tvActive()) {
+            val q = TvLink.last?.optJSONArray("qualities")
+            val hs = (0 until (q?.length() ?: 0)).map { q!!.getInt(it) }
+            if (hs.isEmpty()) { toast("لم يجد التلفاز جودات أخرى لهذا الفيلم"); return }
+            AlertDialog.Builder(this).setTitle("الجودة على التلفاز")
+                .setItems((listOf("تلقائي") + hs.map { "${it}p" }).toTypedArray()) { _, i ->
+                    TvLink.cmd("quality", "h" to (if (i == 0) 0 else hs[i - 1]))
+                    qualityBtn.text = "⚙️ الجودة" + if (i > 0) ": ${hs[i - 1]}p" else ""
+                }.show()
+            return
+        }
         if (!movie.url.lowercase().contains("m3u8")) {
             toast("هذا الفيديو ملف بجودة واحدة. إن كان الموقع يعرض جودات أخرى فاخترها في الصفحة والتقطها من جديد")
             return
@@ -409,13 +433,78 @@ class MovieActivity : AppCompatActivity() {
     private fun casting(): Boolean = CastCtl.active() && CastCtl.movie === movie
 
     private fun reloadHere() {
-        CastCtl.load(movie, CastCtl.lastPos)
+        if (tvActive()) castNow() else CastCtl.load(movie, CastCtl.lastPos)
+    }
+
+    // ---------- اختيار الجهاز ----------
+    private fun tvActive(): Boolean {
+        if (!TvLink.useTv() || phoneDetached) return false
+        val l = TvLink.last ?: return false
+        return l.optString("id") == movie.id && l.optString("state") != "idle"
+    }
+
+    private fun refreshDevice() {
+        if (!built) return
+        deviceText.text = if (TvLink.useTv()) "الجهاز: ${TvLink.selected()?.name} (تطبيق الاستقبال)"
+                          else "الجهاز: Chromecast (أيقونة البث)"
+    }
+
+    private fun chooseDevice() {
+        val rxs = TvLink.found.values.toList()
+        val names = rxs.map { "📺 ${it.name}" } + listOf("Chromecast (أيقونة البث)", "إدخال عنوان التلفاز يدويًا")
+        AlertDialog.Builder(this).setTitle(if (rxs.isEmpty()) "لم أجد تطبيق الاستقبال بعد — افتحه على التلفاز" else "اختر الجهاز")
+            .setItems(names.toTypedArray()) { _, i ->
+                when {
+                    i < rxs.size -> { TvLink.select(rxs[i]); phoneDetached = false; refreshDevice() }
+                    i == rxs.size -> { TvLink.selectCast(); refreshDevice() }
+                    else -> manualAddress()
+                }
+            }.show()
+    }
+
+    private fun manualAddress() {
+        val box = EditText(this).apply { hint = "مثل 192.168.1.50 (يظهر على شاشة التلفاز)"; inputType = InputType.TYPE_CLASS_PHONE }
+        AlertDialog.Builder(this).setTitle("عنوان التلفاز").setView(box)
+            .setPositiveButton("اتصال") { _, _ ->
+                val h = box.text.toString().trim()
+                TvLink.probe(h) { rx ->
+                    if (rx == null) toast("لم أصل إلى التلفاز على هذا العنوان. تأكد أن «عرض عائلي» مفتوح عليه")
+                    else { TvLink.select(rx); phoneDetached = false; refreshDevice(); toast("اتصلت بـ «${rx.name}»") }
+                }
+            }.setNegativeButton("إلغاء", null).show()
+    }
+
+    /** يترك الفيلم يعمل على التلفاز ويوقف تحكم الهاتف */
+    private fun detachPhone() {
+        phoneDetached = true
+        statusText.text = "فُصل الهاتف. الفيلم مستمر على التلفاز، ويمكنك العودة للتحكم من «📺 اعرض على التلفاز» أو «وصل التحكم»."
     }
 
     private fun castNow() {
         saveFields()
+        if (TvLink.useTv()) {
+            phoneDetached = false
+            val l = TvLink.last
+            val given = intent.getLongExtra("pos", 0L).also { intent.removeExtra("pos") }
+            val startAt = when {
+                l != null && l.optString("id") == movie.id && l.optString("state") != "idle" -> l.optLong("pos")
+                player != null -> player!!.currentPosition
+                given > 0 -> given
+                else -> Store.resumeAt(movie)
+            }
+            val j = TvLink.movieJson(movie, startAt) ?: run { toast("الهاتف غير متصل بشبكة Wi-Fi"); return }
+            val name = TvLink.selected()?.name ?: "التلفاز"
+            statusText.text = "يُرسل إلى «$name»…"
+            TvLink.post("/load", j) { ok ->
+                if (ok) {
+                    player?.pause()
+                    statusText.text = "يُعرض على «$name» بإنترنت التلفاز" + if (startAt > 0) " — من ${Util.fmt(startAt / 1000.0)}" else ""
+                } else statusText.text = "لم أصل إلى «$name». افتح «عرض عائلي» على التلفاز، وتأكد أن الهاتف والتلفاز على الشبكة نفسها"
+            }
+            return
+        }
         val given = intent.getLongExtra("pos", 0L).also { intent.removeExtra("pos") }
-        val startAt = player?.currentPosition ?: (if (CastCtl.movie === movie) CastCtl.lastPos else given)
+        val startAt = player?.currentPosition ?: (if (CastCtl.movie === movie) CastCtl.lastPos else given.takeIf { it > 0 } ?: Store.resumeAt(movie))
         val err = CastCtl.load(movie, startAt)
         if (err == "NO_SESSION") {
             pendingCast = true
@@ -428,20 +517,29 @@ class MovieActivity : AppCompatActivity() {
 
     private fun stopAll() {
         player?.pause()
+        if (tvActive()) { TvLink.cmd("stop"); statusText.text = "أُوقف العرض على التلفاز"; return }
         CastCtl.stop()
     }
 
     private fun volume(d: Double) {
-        if (CastCtl.session() != null) CastCtl.volume(d)
+        if (tvActive()) TvLink.cmd("vol", "d" to (if (d > 0) 1 else -1))
+        else if (CastCtl.session() != null) CastCtl.volume(d)
         else player?.let { it.volume = (it.volume + d.toFloat()).coerceIn(0f, 1f) }
     }
 
     private fun muteToggle() {
-        if (CastCtl.session() != null) CastCtl.toggleMute()
+        if (tvActive()) TvLink.cmd("mute")
+        else if (CastCtl.session() != null) CastCtl.toggleMute()
         else player?.let { it.volume = if (it.volume > 0f) 0f else 1f }
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (tvActive() && event.action == KeyEvent.ACTION_DOWN) {
+            when (event.keyCode) {
+                KeyEvent.KEYCODE_VOLUME_UP -> { TvLink.cmd("vol", "d" to 1); return true }
+                KeyEvent.KEYCODE_VOLUME_DOWN -> { TvLink.cmd("vol", "d" to -1); return true }
+            }
+        }
         if (CastCtl.session() != null && event.action == KeyEvent.ACTION_DOWN) {
             when (event.keyCode) {
                 KeyEvent.KEYCODE_VOLUME_UP -> { CastCtl.volume(0.05); return true }
@@ -480,12 +578,14 @@ class MovieActivity : AppCompatActivity() {
         localBtn.text = "⏹ أوقف الهاتف"
     }
 
-    private fun localActive() = player != null && !casting()
+    private fun localActive() = player != null && !casting() && !tvActive()
 
     private fun curPos(): Long =
-        if (casting()) CastCtl.client()?.approximateStreamPosition ?: CastCtl.lastPos else player?.currentPosition ?: 0L
+        if (tvActive()) TvLink.last?.optLong("pos") ?: 0L
+        else if (casting()) CastCtl.client()?.approximateStreamPosition ?: CastCtl.lastPos else player?.currentPosition ?: 0L
 
     private fun duration(): Long {
+        if (tvActive()) return TvLink.last?.optLong("dur") ?: 0L
         if (casting()) return CastCtl.client()?.streamDuration?.takeIf { it > 0 } ?: CastCtl.lastDur
         val d = player?.duration ?: 0L
         return if (d == C.TIME_UNSET || d < 0) 0L else d
@@ -493,11 +593,13 @@ class MovieActivity : AppCompatActivity() {
 
     private fun seekTo(ms: Long) {
         val t = max(0L, ms)
-        if (casting()) CastCtl.seekTo(t) else player?.seekTo(t)
+        if (tvActive()) { TvLink.cmd("seek", "ms" to t); TvLink.last?.put("pos", t) }
+        else if (casting()) CastCtl.seekTo(t) else player?.seekTo(t)
     }
 
     private fun togglePlay() {
-        if (casting()) CastCtl.client()?.togglePlayback()
+        if (tvActive()) TvLink.cmd("toggle")
+        else if (casting()) CastCtl.client()?.togglePlayback()
         else player?.let { if (it.isPlaying) it.pause() else it.play() }
     }
 
@@ -511,12 +613,32 @@ class MovieActivity : AppCompatActivity() {
     }
 
     private fun tick() {
+        tickN++
+        if (TvLink.useTv() && !phoneDetached) {
+            if (tickN % 4 == 0) TvLink.poll { }
+            val l = TvLink.last
+            if (l != null && l.optString("id") == movie.id && l.optString("state") != "idle") {
+                val pos = l.optLong("pos"); val dur = l.optLong("dur")
+                showPos(pos, dur)
+                Store.savePos(movie, pos, dur)
+                volText.text = if (l.optBoolean("mute")) "مكتوم" else "${l.optInt("vol")}٪"
+                val st = when (l.optString("state")) {
+                    "playing" -> "▶ يُعرض"; "paused" -> "⏸ متوقف مؤقتًا"; "buffering" -> "⏳ يُحمّل"
+                    "ended" -> "انتهى الفيلم"; "error" -> "⚠ تعذّر التشغيل"; else -> ""
+                }
+                val age = System.currentTimeMillis() - TvLink.lastOk
+                statusText.text = if (age > 6000) "⚠ انقطع الاتصال بالتلفاز… الفيلم يكمل عليه" else "$st على «${l.optString("name")}» • ${l.optString("msg")}"
+                return
+            }
+        }
         if (casting()) {
+            if (CastCtl.movie === movie) Store.savePos(movie, CastCtl.lastPos, CastCtl.lastDur)
             showPos(curPos(), duration())
             volText.text = CastCtl.volumeText().ifBlank { "الصوت" }
             return
         }
         val p = player ?: return
+        Store.savePos(movie, p.currentPosition, duration())
         val pos = p.currentPosition / 1000.0
         val seg = if (Store.skipEnabled) movie.segments.firstOrNull { pos >= it.start - 0.3 && pos < it.end } else null
         val now = SystemClock.elapsedRealtime()
@@ -533,6 +655,9 @@ class MovieActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        TvLink.start(this)
+        TvLink.onChange = { refreshDevice() }
+        refreshDevice()
         castCtx?.sessionManager?.addSessionManagerListener(sessionListener, CastSession::class.java)
         CastCtl.onStatus = { s -> runOnUiThread { if (built) statusText.text = s } }
         statusText.text = CastCtl.status
@@ -544,6 +669,7 @@ class MovieActivity : AppCompatActivity() {
         super.onPause()
         castCtx?.sessionManager?.removeSessionManagerListener(sessionListener, CastSession::class.java)
         CastCtl.onStatus = null
+        TvLink.onChange = null
         handler.removeCallbacks(loop)
         saveFields()
         player?.pause()

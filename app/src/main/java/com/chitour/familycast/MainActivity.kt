@@ -64,7 +64,7 @@ class MainActivity : AppCompatActivity() {
         val bottom = hbox()
         foundBtn = btn("فيديوهات مكتشفة (0)") { showFound() }
         bottom.add(foundBtn, 1.4f)
-        bottom.add(btn("أفلامي") { startActivity(Intent(this, MoviesActivity::class.java)) }, 1f)
+        bottom.add(btn("السجل") { startActivity(Intent(this, MoviesActivity::class.java)) }, 1f)
         bottom.add(btn("رابط مباشر") { askDirect() }, 1f)
         root.add(bottom)
         setContentView(root)
@@ -344,6 +344,70 @@ class MainActivity : AppCompatActivity() {
 
     private fun chooseTarget(f: Found) {
         val ua = web.settings.userAgentString ?: ""
+        Store.match(f.url, null)?.let { reuse(it, f.url, f.ref, ua, false); return }
+        if (Store.movies.isEmpty()) { newMovie(f.url, f.ref, ua, false, null); return }
+        val names = listOf("➕ فيلم جديد") + Store.movies.map { "ربطه بقائمة: ${it.title}" }
+        AlertDialog.Builder(this).setTitle("أين تضع هذا الفيديو؟")
+            .setItems(names.toTypedArray()) { _, i ->
+                if (i == 0) newMovie(f.url, f.ref, ua, false, null)
+                else {
+                    val m = Store.movies[i - 1]
+                    m.url = f.url; m.referer = f.ref; m.userAgent = ua; m.useProxy = false; m.variant = ""; m.variantLabel = ""
+                    addSubs(m)
+                    Store.save(); open(m)
+                }
+            }.show()
+    }
+
+    private fun askDirect() {
+        val box = EditText(this).apply { hint = "الصق رابط الفيديو المباشر (mp4 أو m3u8)" }
+        AlertDialog.Builder(this).setTitle("رابط مباشر").setView(box)
+            .setPositiveButton("متابعة") { _, _ ->
+                val u = box.text.toString().trim()
+                if (u.startsWith("http")) newMovie(u, "", "", false, null) else toast("الرابط غير صحيح")
+            }.setNegativeButton("إلغاء", null).show()
+    }
+
+    private fun newMovie(u: String, ref: String, ua: String, proxy: Boolean, title: String?) {
+        // إن كان الفيلم محفوظًا من قبل نكمل عليه: قائمة التجاوز ومكان التوقف والترجمة تبقى كما هي
+        val old = Store.match(u, title)
+        if (old != null) { reuse(old, u, ref, ua, proxy); return }
+        val start = { name: String ->
+            val m = Movie(System.currentTimeMillis().toString(), name.ifBlank { "فيلم" }, u, ref, ua, proxy)
+            if (u.startsWith("http") && ref.isNotEmpty()) addSubs(m)
+            pendingSub?.let { if (it.startsWith("http")) m.subs.add(0, Sub(it, "ترجمة التطبيق")) }
+            pendingSub = null
+            Store.add(m)
+            val pos = pendingPos; pendingPos = 0L
+            startActivity(Intent(this, MovieActivity::class.java).putExtra("id", m.id).putExtra("autocast", true).putExtra("pos", pos))
+        }
+        // إذا وصل اسم الفيلم من تطبيق الأفلام لا نسأل عنه
+        if (!title.isNullOrBlank()) { start(title); return }
+        val box = EditText(this).apply {
+            setText(web.title?.takeIf { it.isNotBlank() && !it.startsWith("http") } ?: "فيلم جديد")
+            selectAll()
+        }
+        AlertDialog.Builder(this).setTitle("اسم الفيلم").setView(box)
+            .setPositiveButton("حفظ") { _, _ -> start(box.text.toString()) }
+            .setNegativeButton("إلغاء", null).show()
+    }
+
+    private fun reuse(m: Movie, u: String, ref: String, ua: String, proxy: Boolean) {
+        if (m.url != u) { m.url = u; m.variant = ""; m.variantLabel = "" }
+        m.referer = ref; m.userAgent = ua; m.useProxy = proxy
+        if (u.startsWith("http") && ref.isNotEmpty()) addSubs(m)
+        pendingSub?.let { s -> if (s.startsWith("http") && m.subs.none { it.url == s }) m.subs.add(0, Sub(s, "ترجمة التطبيق")) }
+        pendingSub = null
+        m.watchedAt = System.currentTimeMillis()
+        Store.movies.remove(m); Store.movies.add(0, m); Store.save()
+        val pos = pendingPos.takeIf { it > 0 } ?: 0L; pendingPos = 0L
+        toast("«${m.title}»: قائمة التجاوز محفوظة (${m.segments.size} مقطع)")
+        startActivity(Intent(this, MovieActivity::class.java).putExtra("id", m.id).putExtra("autocast", true).putExtra("pos", pos))
+    }
+
+    private fun chooseTarget(f: Found) {
+        val ua = web.settings.userAgentString ?: ""
+        Store.match(f.url, null)?.let { reuse(it, f.url, f.ref, ua, false); return }
         if (Store.movies.isEmpty()) { newMovie(f.url, f.ref, ua, false, null); return }
         val names = listOf("➕ فيلم جديد") + Store.movies.map { "ربطه بقائمة: ${it.title}" }
         AlertDialog.Builder(this).setTitle("أين تضع هذا الفيديو؟")
