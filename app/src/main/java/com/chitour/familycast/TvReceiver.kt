@@ -79,7 +79,7 @@ class ReceiverService : Service() {
 
     companion object {
         const val PORT = 8766
-        const val TYPE = "_familycast._tcp."
+        const val TYPE = "_familycast._tcp"
         fun start(ctx: Context) {
             try { ctx.startForegroundService(Intent(ctx, ReceiverService::class.java)) } catch (e: Exception) {
                 try { ctx.startService(Intent(ctx, ReceiverService::class.java)) } catch (x: Exception) { }
