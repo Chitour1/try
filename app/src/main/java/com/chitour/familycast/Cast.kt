@@ -72,6 +72,7 @@ class App : Application() {
     override fun onCreate() {
         super.onCreate()
         Store.init(this)
+        Proxy.ctx = applicationContext
         try {
             val sm = CastContext.getSharedInstance(this).sessionManager
             sm.addSessionManagerListener(object : SessionManagerListener<CastSession> {

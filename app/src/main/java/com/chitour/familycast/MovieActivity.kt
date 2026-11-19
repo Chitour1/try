@@ -25,6 +25,7 @@ import androidx.appcompat.widget.SwitchCompat
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
+import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
@@ -89,6 +90,7 @@ class MovieActivity : AppCompatActivity() {
         castCtx = try { CastContext.getSharedInstance(this) } catch (e: Exception) { null }
         buildUi()
         refreshSegs()
+        if (intent.getBooleanExtra("autocast", false)) handler.postDelayed({ castNow() }, 400)
     }
 
     private fun buildUi() {
@@ -305,7 +307,10 @@ class MovieActivity : AppCompatActivity() {
             return
         }
         var url = movie.url
-        if (movie.useProxy) {
+        val local = url.startsWith("content://") || url.startsWith("file://")
+        if (local) {
+            url = Proxy.wrapLocal(movie.url) ?: run { toast("الهاتف غير متصل بشبكة Wi-Fi"); return }
+        } else if (movie.useProxy) {
             url = Proxy.wrap(movie.url, movie.referer, movie.userAgent)
                 ?: run { toast("الهاتف غير متصل بشبكة Wi-Fi"); return }
         }
@@ -313,7 +318,7 @@ class MovieActivity : AppCompatActivity() {
         md.putString(MediaMetadata.KEY_TITLE, movie.title)
         val info = MediaInfo.Builder(url)
             .setStreamType(MediaInfo.STREAM_TYPE_BUFFERED)
-            .setContentType(Util.mimeOf(movie.url))
+            .setContentType(if (local) "video/mp4" else Util.mimeOf(movie.url))
             .setMetadata(md)
             .build()
         SkipEngine.movie = movie
@@ -341,7 +346,7 @@ class MovieActivity : AppCompatActivity() {
         val ds = DefaultHttpDataSource.Factory().setAllowCrossProtocolRedirects(true)
         if (movie.userAgent.isNotEmpty()) ds.setUserAgent(movie.userAgent)
         if (movie.referer.isNotEmpty()) ds.setDefaultRequestProperties(mapOf("Referer" to movie.referer))
-        val p = ExoPlayer.Builder(this).setMediaSourceFactory(DefaultMediaSourceFactory(this).setDataSourceFactory(ds)).build()
+        val p = ExoPlayer.Builder(this).setMediaSourceFactory(DefaultMediaSourceFactory(this).setDataSourceFactory(DefaultDataSource.Factory(this, ds))).build()
         val item = MediaItem.Builder().setUri(movie.url).apply {
             if (movie.url.lowercase().contains("m3u8")) setMimeType(MimeTypes.APPLICATION_M3U8)
         }.build()

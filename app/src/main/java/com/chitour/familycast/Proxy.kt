@@ -11,6 +11,18 @@ import java.net.URL
 /** خادم صغير على الهاتف يمرّر الفيديو إلى التلفاز مع ترويسات الموقع (للمواقع التي ترفض التلفاز مباشرة) */
 object Proxy {
     private var server: Server? = null
+    var ctx: android.content.Context? = null
+    private val locals = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    /** ملف من الهاتف نفسه (content:// أو file://) يُقدَّم للتلفاز عبر الخادم الصغير */
+    fun wrapLocal(uri: String): String? {
+        val ip = localIp() ?: return null
+        val port = ensure()
+        val id = Integer.toHexString(uri.hashCode())
+        locals[id] = uri
+        return "http://$ip:$port/f/$id.mp4"
+    }
+    fun localUri(id: String): String? = locals[id]
     private const val F = Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING
 
     fun enc(s: String): String = Base64.encodeToString(s.toByteArray(), F)
@@ -73,6 +85,9 @@ object Proxy {
         override fun serve(session: IHTTPSession): Response {
             if (session.method == Method.OPTIONS)
                 return cors(NanoHTTPD.newFixedLengthResponse(Response.Status.OK, "text/plain", ""))
+            if (session.uri.startsWith("/f/")) return try { serveLocal(session) } catch (e: Exception) {
+                cors(NanoHTTPD.newFixedLengthResponse(Response.Status.INTERNAL_ERROR, "text/plain", e.toString()))
+            }
             return try {
                 val p = session.parameters
                 val u = p["u"]?.firstOrNull()
@@ -108,6 +123,32 @@ object Proxy {
             val r = if (len >= 0) NanoHTTPD.newFixedLengthResponse(status(code), mime, stream, len)
                     else NanoHTTPD.newChunkedResponse(status(code), mime, stream)
             c.getHeaderField("Content-Range")?.let { r.addHeader("Content-Range", it) }
+            r.addHeader("Accept-Ranges", "bytes")
+            return cors(r)
+        }
+
+        private fun serveLocal(session: IHTTPSession): Response {
+            val id = session.uri.removePrefix("/f/").substringBefore('.')
+            val u = Proxy.localUri(id) ?: return cors(NanoHTTPD.newFixedLengthResponse(Response.Status.NOT_FOUND, "text/plain", "gone"))
+            val cr = Proxy.ctx!!.contentResolver
+            val uri = android.net.Uri.parse(u)
+            val pfd = if (uri.scheme == "file") android.os.ParcelFileDescriptor.open(java.io.File(uri.path!!), android.os.ParcelFileDescriptor.MODE_READ_ONLY)
+                      else cr.openFileDescriptor(uri, "r")!!
+            val total = pfd.statSize
+            val mime = (if (uri.scheme == "content") cr.getType(uri) else null) ?: "video/mp4"
+            var start = 0L
+            var end = total - 1
+            val range = session.headers["range"]
+            if (range != null && range.startsWith("bytes=")) {
+                val parts = range.removePrefix("bytes=").split("-")
+                start = parts[0].toLongOrNull() ?: 0L
+                parts.getOrNull(1)?.toLongOrNull()?.let { end = minOf(it, total - 1) }
+            }
+            val ins = java.io.FileInputStream(pfd.fileDescriptor)
+            ins.channel.position(start)
+            val len = end - start + 1
+            val r = NanoHTTPD.newFixedLengthResponse(status(if (range != null) 206 else 200), mime, ins, len)
+            if (range != null) r.addHeader("Content-Range", "bytes $start-$end/$total")
             r.addHeader("Accept-Ranges", "bytes")
             return cors(r)
         }

@@ -28,7 +28,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var urlBox: EditText
     private lateinit var foundBtn: Button
     @Volatile private var pageUrl = ""
-    private val found = LinkedHashMap<String, String>()
+    private val found = LinkedHashMap<String, Found>()
+    private val pool = java.util.concurrent.Executors.newFixedThreadPool(3)
     private val handler = Handler(Looper.getMainLooper())
     private val scanLoop = object : Runnable {
         override fun run() { scanDom(); handler.postDelayed(this, 3000) }
@@ -70,12 +71,64 @@ class MainActivity : AppCompatActivity() {
 
     override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); handleShare(intent) }
 
+    /** يستقبل الروابط المرسلة من تطبيقات الأفلام («فتح باستخدام») أو المشاركة */
     private fun handleShare(i: Intent?): Boolean {
-        if (i?.action != Intent.ACTION_SEND) return false
-        val text = i.getStringExtra(Intent.EXTRA_TEXT) ?: return false
-        val url = Regex("""https?://\S+""").find(text)?.value ?: return false
-        if (Util.isVideoUrl(url)) newMovie(url, "", "", false) else web.loadUrl(url)
+        if (i == null) return false
+        var url: String? = null
+        var title: String? = null
+        var ref = ""
+        var ua = ""
+        val ex = i.extras
+        when (i.action) {
+            Intent.ACTION_VIEW -> {
+                val d = i.data ?: return false
+                if (d.scheme == "wvc-x-callback" || d.scheme == "familycast") {
+                    url = d.getQueryParameter("url") ?: d.getQueryParameter("uri")
+                    title = d.getQueryParameter("title") ?: d.getQueryParameter("filename")
+                    ref = d.getQueryParameter("referer") ?: d.getQueryParameter("referrer") ?: ""
+                    ua = d.getQueryParameter("user-agent") ?: d.getQueryParameter("useragent") ?: ""
+                    for (h in d.getQueryParameters("header") + d.getQueryParameters("headers")) {
+                        val k = h.substringBefore(':').trim().lowercase(); val v = h.substringAfter(':', "").trim()
+                        if (k == "referer") ref = v
+                        if (k == "user-agent") ua = v
+                    }
+                } else url = d.toString()
+            }
+            Intent.ACTION_SEND -> {
+                @Suppress("DEPRECATION")
+                val st = ex?.get(Intent.EXTRA_STREAM) as? Uri
+                url = st?.toString() ?: i.getStringExtra(Intent.EXTRA_TEXT)?.let { Regex("""https?://\S+""").find(it)?.value }
+            }
+            else -> return false
+        }
+        if (ex != null) {
+            title = title ?: ex.getString("title") ?: ex.getString(Intent.EXTRA_TITLE)
+            val hs = try { ex.getStringArray("headers") } catch (e: Exception) { null }
+            if (hs != null) for (k in 0 until hs.size - 1 step 2) {
+                if (hs[k].equals("Referer", true)) ref = hs[k + 1]
+                if (hs[k].equals("User-Agent", true)) ua = hs[k + 1]
+            }
+            ex.getString("referer")?.let { ref = it }
+            ex.getString("Referer")?.let { ref = it }
+            ex.getString("user-agent")?.let { ua = it }
+        }
+        if (url.isNullOrBlank()) { showIntent(i); return true }
+        val u = url!!
+        if (u.startsWith("http") && !Util.isVideoUrl(u) && i.type?.startsWith("video") != true &&
+            i.action == Intent.ACTION_SEND) { web.loadUrl(u); return true }
+        val needProxy = ref.isNotEmpty() || ua.isNotEmpty() || u.lowercase().contains("m3u8")
+        newMovie(u, ref, ua, needProxy, title)
         return true
+    }
+
+    /** إن وصل رابط بصيغة لا أعرفها أعرض تفاصيله ليصوّرها المستخدم */
+    private fun showIntent(i: Intent) {
+        val sb = StringBuilder()
+        sb.append("action: ${i.action}\ndata: ${i.dataString}\ntype: ${i.type}\n")
+        i.extras?.keySet()?.forEach { k -> @Suppress("DEPRECATION") sb.append("$k = ${i.extras?.get(k)}\n") }
+        AlertDialog.Builder(this).setTitle("وصل طلب لم أجد فيه رابط فيديو")
+            .setMessage("صوّر هذه الشاشة وأرسلها لأضيف دعم هذا التطبيق:\n\n$sb")
+            .setPositiveButton("حسنًا", null).show()
     }
 
     private fun setupWeb() {
@@ -125,35 +178,47 @@ class MainActivity : AppCompatActivity() {
 
     private fun addFound(u: String, ref: String) {
         if (found.containsKey(u)) return
-        found[u] = ref
-        foundBtn.text = "فيديوهات مكتشفة (${found.size})"
-        if (found.size == 1) toast("عُثر على فيديو في الصفحة. اضغط «فيديوهات مكتشفة»")
+        val f = Found(u, ref)
+        found[u] = f
+        updateFoundBtn()
+        val ua = web.settings.userAgentString ?: ""
+        pool.execute { Probe.run(f, ua); runOnUiThread { updateFoundBtn() } }
     }
 
-    private fun shortName(u: String): String {
-        val uri = Uri.parse(u)
-        val last = uri.lastPathSegment ?: ""
-        return "${uri.host ?: ""} … ${last.takeLast(40)}"
+    private fun sorted(): List<Found> = found.values.sortedByDescending { it.score() }
+
+    private fun best(): Found? = sorted().firstOrNull { it.done && it.score() >= 600 }
+
+    private var announced = false
+
+    private fun updateFoundBtn() {
+        val b = best()
+        foundBtn.text = if (b != null) "📺 أرسل الفيلم إلى التلفاز" + (b.dur?.let { " (${Util.fmt(it)})" } ?: "")
+                        else "فيديوهات مكتشفة (${found.size})"
+        if (b != null && !announced) { announced = true; toast("وجدت الفيلم. اضغط «أرسل الفيلم إلى التلفاز» في الأسفل") }
     }
 
     private fun showFound() {
         if (found.isEmpty()) { toast("لم يُكتشف فيديو بعد. افتح صفحة الفيلم وشغّله فيها أولًا"); return }
-        val keys = found.keys.toList().reversed()
-        AlertDialog.Builder(this).setTitle("اختر الفيديو (الأحدث أولًا)")
-            .setItems(keys.map { shortName(it) }.toTypedArray()) { _, i -> chooseTarget(keys[i], found[keys[i]] ?: "") }
-            .setNeutralButton("مسح القائمة") { _, _ -> found.clear(); foundBtn.text = "فيديوهات مكتشفة (0)" }
+        val list = sorted()
+        val b = best()
+        val names = list.map { f -> (if (f === b) "⭐ الأرجح أنه الفيلم\n" else "") + f.describe() }
+        AlertDialog.Builder(this).setTitle("اختر الفيديو (الأطول أولًا)")
+            .setItems(names.toTypedArray()) { _, i -> chooseTarget(list[i]) }
+            .setNeutralButton("مسح القائمة") { _, _ -> found.clear(); announced = false; updateFoundBtn() }
             .show()
     }
 
-    private fun chooseTarget(u: String, ref: String) {
+    private fun chooseTarget(f: Found) {
         val ua = web.settings.userAgentString ?: ""
+        if (Store.movies.isEmpty()) { newMovie(f.url, f.ref, ua, true, null); return }
         val names = listOf("➕ فيلم جديد") + Store.movies.map { "ربطه بقائمة: ${it.title}" }
         AlertDialog.Builder(this).setTitle("أين تضع هذا الفيديو؟")
             .setItems(names.toTypedArray()) { _, i ->
-                if (i == 0) newMovie(u, ref, ua, true)
+                if (i == 0) newMovie(f.url, f.ref, ua, true, null)
                 else {
                     val m = Store.movies[i - 1]
-                    m.url = u; m.referer = ref; m.userAgent = ua; m.useProxy = true
+                    m.url = f.url; m.referer = f.ref; m.userAgent = ua; m.useProxy = true
                     Store.save(); open(m)
                 }
             }.show()
@@ -164,13 +229,13 @@ class MainActivity : AppCompatActivity() {
         AlertDialog.Builder(this).setTitle("رابط مباشر").setView(box)
             .setPositiveButton("متابعة") { _, _ ->
                 val u = box.text.toString().trim()
-                if (u.startsWith("http")) newMovie(u, "", "", false) else toast("الرابط غير صحيح")
+                if (u.startsWith("http")) newMovie(u, "", "", u.lowercase().contains("m3u8"), null) else toast("الرابط غير صحيح")
             }.setNegativeButton("إلغاء", null).show()
     }
 
-    private fun newMovie(u: String, ref: String, ua: String, proxy: Boolean) {
+    private fun newMovie(u: String, ref: String, ua: String, proxy: Boolean, title: String?) {
         val box = EditText(this).apply {
-            setText(web.title?.takeIf { it.isNotBlank() && !it.startsWith("http") } ?: "فيلم جديد")
+            setText(title?.takeIf { it.isNotBlank() } ?: web.title?.takeIf { it.isNotBlank() && !it.startsWith("http") } ?: "فيلم جديد")
             selectAll()
         }
         AlertDialog.Builder(this).setTitle("اسم الفيلم").setView(box)
@@ -180,12 +245,12 @@ class MainActivity : AppCompatActivity() {
             }.setNegativeButton("إلغاء", null).show()
     }
 
-    private fun open(m: Movie) = startActivity(Intent(this, MovieActivity::class.java).putExtra("id", m.id))
+    private fun open(m: Movie) = startActivity(Intent(this, MovieActivity::class.java).putExtra("id", m.id).putExtra("autocast", true))
 
     private fun go() {
         var t = urlBox.text.toString().trim()
         if (t.isEmpty()) return
-        if (Util.isVideoUrl(t)) { newMovie(t, pageUrl, web.settings.userAgentString ?: "", false); return }
+        if (Util.isVideoUrl(t)) { newMovie(t, "", "", t.lowercase().contains("m3u8"), null); return }
         if (!t.startsWith("http")) {
             t = if (t.contains('.') && !t.contains(' ')) "https://$t"
                 else "https://www.google.com/search?q=" + Uri.encode(t)
