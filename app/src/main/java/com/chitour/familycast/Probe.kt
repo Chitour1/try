@@ -43,7 +43,9 @@ object Probe {
         c.instanceFollowRedirects = true
         c.connectTimeout = 10000; c.readTimeout = 15000
         if (ref.isNotEmpty()) c.setRequestProperty("Referer", ref)
-        if (ua.isNotEmpty()) c.setRequestProperty("User-Agent", ua)
+        val (uaLine, extra) = Util.splitHeaders(ua)
+        if (uaLine.isNotEmpty()) c.setRequestProperty("User-Agent", uaLine)
+        for ((k, v) in extra) c.setRequestProperty(k, v)
         if (range != null) c.setRequestProperty("Range", range)
         return c
     }

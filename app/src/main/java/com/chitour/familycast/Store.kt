@@ -157,6 +157,17 @@ object Util {
         "${fmt(it.start)} - ${fmt(it.end)} ${if (it.mute) "كتم" else "تجاوز"}" + (if (it.note.isNotBlank()) " ${it.note}" else "")
     }
 
+    /** حقل «userAgent» قد يحمل في سطوره التالية ترويسات إضافية بصيغة «الاسم: القيمة» */
+    fun splitHeaders(ua: String): Pair<String, Map<String, String>> {
+        val lines = ua.split('\n')
+        val extra = LinkedHashMap<String, String>()
+        for (l in lines.drop(1)) {
+            val k = l.substringBefore(':').trim(); val v = l.substringAfter(':', "").trim()
+            if (k.isNotEmpty() && v.isNotEmpty()) extra[k] = v
+        }
+        return lines.first().trim() to extra
+    }
+
     fun isSubUrl(u: String): Boolean =
         u.lowercase().startsWith("http") && Regex("""\.(vtt|srt)(\?|#|$)""").containsMatchIn(u.lowercase())
 

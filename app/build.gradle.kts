@@ -12,6 +12,19 @@ android {
         versionCode = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1
         versionName = "1." + (System.getenv("GITHUB_RUN_NUMBER") ?: "0")
     }
+    flavorDimensions += "id"
+    productFlavors {
+        create("normal") {
+            dimension = "id"
+            manifestPlaceholders["appLabel"] = "عرض عائلي"
+        }
+        // نسخة ثانية تحمل الاسم الداخلي الذي ترسل إليه تطبيقات الأفلام زر البث
+        create("wvc") {
+            dimension = "id"
+            applicationId = "com.instantbits.cast.webvideo"
+            manifestPlaceholders["appLabel"] = "عرض عائلي ٢"
+        }
+    }
     signingConfigs {
         create("fixed") {
             storeFile = file("familycast.jks")

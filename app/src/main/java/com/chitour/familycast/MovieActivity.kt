@@ -414,7 +414,8 @@ class MovieActivity : AppCompatActivity() {
 
     private fun castNow() {
         saveFields()
-        val startAt = player?.currentPosition ?: (if (CastCtl.movie === movie) CastCtl.lastPos else 0L)
+        val given = intent.getLongExtra("pos", 0L).also { intent.removeExtra("pos") }
+        val startAt = player?.currentPosition ?: (if (CastCtl.movie === movie) CastCtl.lastPos else given)
         val err = CastCtl.load(movie, startAt)
         if (err == "NO_SESSION") {
             pendingCast = true
@@ -460,8 +461,11 @@ class MovieActivity : AppCompatActivity() {
         saveFields()
         val src = movie.variant.ifBlank { movie.url }
         val ds = DefaultHttpDataSource.Factory().setAllowCrossProtocolRedirects(true)
-        if (movie.userAgent.isNotEmpty()) ds.setUserAgent(movie.userAgent)
-        if (movie.referer.isNotEmpty()) ds.setDefaultRequestProperties(mapOf("Referer" to movie.referer))
+        val (uaLine, extra) = Util.splitHeaders(movie.userAgent)
+        if (uaLine.isNotEmpty()) ds.setUserAgent(uaLine)
+        val props = HashMap(extra)
+        if (movie.referer.isNotEmpty()) props["Referer"] = movie.referer
+        if (props.isNotEmpty()) ds.setDefaultRequestProperties(props)
         val p = ExoPlayer.Builder(this).setMediaSourceFactory(DefaultMediaSourceFactory(this).setDataSourceFactory(DefaultDataSource.Factory(this, ds))).build()
         val item = MediaItem.Builder().setUri(src).apply {
             if (src.lowercase().contains("m3u8")) setMimeType(MimeTypes.APPLICATION_M3U8)

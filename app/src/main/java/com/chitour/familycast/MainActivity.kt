@@ -31,6 +31,8 @@ class MainActivity : AppCompatActivity() {
     private val found = LinkedHashMap<String, Found>()
     private val foundSubs = mutableListOf<String>()
     private var lastClip = ""
+    private var pendingSub: String? = null
+    private var pendingPos = 0L
     private val pool = java.util.concurrent.Executors.newFixedThreadPool(3)
     private val handler = Handler(Looper.getMainLooper())
     private val scanLoop = object : Runnable {
@@ -135,22 +137,44 @@ class MainActivity : AppCompatActivity() {
             }
             else -> return false
         }
+        val extraHdr = LinkedHashMap<String, String>()
+        var subUrl: String? = null
+        var startPos = 0L
         if (ex != null) {
-            title = title ?: ex.getString("title") ?: ex.getString(Intent.EXTRA_TITLE)
+            title = title ?: ex.getString("title") ?: ex.getString(Intent.EXTRA_TITLE) ?: ex.getString("filename")
             val hs = try { ex.getStringArray("headers") } catch (e: Exception) { null }
             if (hs != null) for (k in 0 until hs.size - 1 step 2) {
-                if (hs[k].equals("Referer", true)) ref = hs[k + 1]
-                if (hs[k].equals("User-Agent", true)) ua = hs[k + 1]
+                when {
+                    hs[k].equals("Referer", true) -> ref = hs[k + 1]
+                    hs[k].equals("User-Agent", true) -> ua = hs[k + 1]
+                    else -> extraHdr[hs[k]] = hs[k + 1]
+                }
+            }
+            val hb = try { ex.getBundle("android.media.intent.extra.HTTP_HEADERS") } catch (e: Exception) { null }
+            hb?.keySet()?.forEach { k ->
+                val v = hb.getString(k) ?: return@forEach
+                when {
+                    k.equals("Referer", true) -> ref = v
+                    k.equals("User-Agent", true) -> ua = v
+                    else -> extraHdr[k] = v
+                }
             }
             ex.getString("referer")?.let { ref = it }
             ex.getString("Referer")?.let { ref = it }
             ex.getString("user-agent")?.let { ua = it }
+            subUrl = ex.getString("subtitle") ?: (try { ex.getStringArray("subs") } catch (e: Exception) { null })?.firstOrNull()
+            @Suppress("DEPRECATION")
+            val posObj = ex.get("position")
+            startPos = (posObj as? Number)?.toLong() ?: 0L
         }
+        if (extraHdr.isNotEmpty()) ua = (listOf(ua) + extraHdr.map { "${it.key}: ${it.value}" }).joinToString("\n")
+        pendingSub = subUrl
+        pendingPos = startPos
         if (url.isNullOrBlank()) { showIntent(i); return true }
         val u = url!!
         if (u.startsWith("http") && !Util.isVideoUrl(u) && i.type?.startsWith("video") != true &&
             i.action == Intent.ACTION_SEND) { web.loadUrl(u); return true }
-        val needProxy = ref.isNotEmpty()
+        val needProxy = ref.isNotEmpty() || extraHdr.isNotEmpty()
         newMovie(u, ref, ua, needProxy, title)
         return true
     }
@@ -330,7 +354,11 @@ class MainActivity : AppCompatActivity() {
             .setPositiveButton("حفظ") { _, _ ->
                 val m = Movie(System.currentTimeMillis().toString(), box.text.toString().ifBlank { "فيلم" }, u, ref, ua, proxy)
                 if (u.startsWith("http") && ref.isNotEmpty()) addSubs(m)
-                Store.add(m); open(m)
+                pendingSub?.let { if (it.startsWith("http")) m.subs.add(0, Sub(it, "ترجمة التطبيق")) }
+                pendingSub = null
+                Store.add(m)
+                val pos = pendingPos; pendingPos = 0L
+                startActivity(Intent(this, MovieActivity::class.java).putExtra("id", m.id).putExtra("autocast", true).putExtra("pos", pos))
             }.setNegativeButton("إلغاء", null).show()
     }
 

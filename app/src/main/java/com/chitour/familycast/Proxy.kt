@@ -132,8 +132,10 @@ object Proxy {
                     c.instanceFollowRedirects = true
                     c.connectTimeout = 20000
                     c.readTimeout = 60000
+                    val (uaLine, extra) = Util.splitHeaders(ua)
                     if (ref.isNotEmpty()) c.setRequestProperty("Referer", ref)
-                    c.setRequestProperty("User-Agent", ua.ifEmpty { "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/124 Mobile Safari/537.36" })
+                    c.setRequestProperty("User-Agent", uaLine.ifEmpty { "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/124 Mobile Safari/537.36" })
+                    for ((k, v) in extra) c.setRequestProperty(k, v)
                     if (range != null) c.setRequestProperty("Range", range)
                     val code = c.responseCode
                     if (code >= 500 && attempt < 2) { c.disconnect(); Thread.sleep(700L * (attempt + 1)); continue }
