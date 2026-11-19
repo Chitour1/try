@@ -12,6 +12,15 @@ class Found(val url: String, val ref: String) {
     @Volatile var done = false
     @Volatile var failed = false
 
+    /** يُستبعد كل ما دون 50 ميغابايت (أو دون عشر دقائق في البث) لأنه إعلان وليس الفيلم */
+    fun passes(): Boolean {
+        if (!done) return false
+        if (failed) return true
+        size?.let { return it >= 50_000_000L }
+        dur?.let { return it >= 600.0 }
+        return true
+    }
+
     /** درجة الترجيح: المدة بالثواني، أو تقدير المدة من الحجم */
     fun score(): Double = dur ?: size?.let { it / 150_000.0 } ?: -1.0
 

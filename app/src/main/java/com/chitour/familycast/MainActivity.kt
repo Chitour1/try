@@ -185,7 +185,7 @@ class MainActivity : AppCompatActivity() {
         pool.execute { Probe.run(f, ua); runOnUiThread { updateFoundBtn() } }
     }
 
-    private fun sorted(): List<Found> = found.values.sortedByDescending { it.score() }
+    private fun sorted(): List<Found> = found.values.filter { it.passes() }.sortedByDescending { it.score() }
 
     private fun best(): Found? = sorted().firstOrNull { it.done && it.score() >= 600 }
 
@@ -194,13 +194,17 @@ class MainActivity : AppCompatActivity() {
     private fun updateFoundBtn() {
         val b = best()
         foundBtn.text = if (b != null) "📺 أرسل الفيلم إلى التلفاز" + (b.dur?.let { " (${Util.fmt(it)})" } ?: "")
-                        else "فيديوهات مكتشفة (${found.size})"
+                        else "فيديوهات مكتشفة (${sorted().size})"
         if (b != null && !announced) { announced = true; toast("وجدت الفيلم. اضغط «أرسل الفيلم إلى التلفاز» في الأسفل") }
     }
 
     private fun showFound() {
-        if (found.isEmpty()) { toast("لم يُكتشف فيديو بعد. افتح صفحة الفيلم وشغّله فيها أولًا"); return }
         val list = sorted()
+        if (list.isEmpty()) {
+            toast(if (found.isEmpty()) "لم يُكتشف فيديو بعد. افتح صفحة الفيلم وشغّله فيها أولًا"
+                  else "كل ما وُجد حتى الآن إعلانات صغيرة (أقل من 50 ميغابايت) فاستبعدتها. شغّل الفيلم في الصفحة وانتظر قليلًا")
+            return
+        }
         val b = best()
         val names = list.map { f -> (if (f === b) "⭐ الأرجح أنه الفيلم\n" else "") + f.describe() }
         AlertDialog.Builder(this).setTitle("اختر الفيديو (الأطول أولًا)")
