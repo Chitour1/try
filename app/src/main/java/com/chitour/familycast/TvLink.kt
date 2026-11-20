@@ -190,6 +190,43 @@ object TvLink {
         }.start()
     }
 
+    /** المكتبة كاملة للتلفاز، ليشغّل منها دون الهاتف */
+    fun libJson(): JSONArray {
+        val a = JSONArray()
+        for (m in Store.movies) {
+            if (m.isLocal()) continue
+            val j = movieJson(m, 0) ?: continue
+            j.put("sec", m.section).put("ser", m.series).put("ep", m.ep).put("wl", m.watch).put("po", m.poster)
+                .put("pos", m.pos).put("dur", m.dur).put("at", m.watchedAt)
+            a.put(j)
+        }
+        return a
+    }
+
+    fun syncLibrary() {
+        if (!useTv()) return
+        try { post("/library", JSONObject().put("items", libJson()).put("sections", JSONArray(Store.sections))) } catch (e: Exception) { }
+    }
+
+    /** يأخذ من التلفاز أماكن التوقف لما شوهد عليه دون الهاتف */
+    fun pullHistory(done: () -> Unit) {
+        val rx = selected() ?: return
+        if (!preferTv()) return
+        Thread {
+            val t = try { request(rx, "/history", null) } catch (e: Exception) { null }
+            main.post {
+                if (t != null) try {
+                    val o = JSONObject(t); var changed = false
+                    for (k in o.keys()) {
+                        val h = o.getJSONObject(k); val m = Store.get(k) ?: continue
+                        if (h.optLong("at") > m.watchedAt) { m.pos = h.optLong("pos"); m.dur = h.optLong("dur").takeIf { it > 0 } ?: m.dur; m.watchedAt = h.optLong("at"); changed = true }
+                    }
+                    if (changed) { Store.save(); done() }
+                } catch (e: Exception) { }
+            }
+        }.start()
+    }
+
     fun segJson(m: Movie): JSONArray {
         val a = JSONArray()
         for (s in m.segments) a.put(JSONObject().put("s", s.start).put("e", s.end).put("m", s.mute).put("c", s.cover).put("n", s.note))
@@ -211,6 +248,6 @@ object TvLink {
             .put("referer", m.referer).put("ua", m.userAgent).put("start", startMs)
             .put("segments", segJson(m)).put("skip", Store.skipEnabled)
             .put("subs", subs).put("subsOn", m.subsOn).put("subScale", Store.subScale.toDouble())
-            .put("coverScale", Store.coverScale.toDouble())
+            .put("coverScale", Store.coverScale.toDouble()).put("tts", Store.ttsMode)
     }
 }

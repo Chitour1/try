@@ -33,6 +33,7 @@ class MainActivity : AppCompatActivity() {
     private var lastClip = ""
     private var pendingSub: String? = null
     private var pendingPos = 0L
+    private var pendingPoster = ""
     private val pool = java.util.concurrent.Executors.newFixedThreadPool(3)
     private val handler = Handler(Looper.getMainLooper())
     private val scanLoop = object : Runnable {
@@ -64,7 +65,7 @@ class MainActivity : AppCompatActivity() {
         val bottom = hbox()
         foundBtn = btn("فيديوهات مكتشفة (0)") { showFound() }
         bottom.add(foundBtn, 1.4f)
-        bottom.add(btn("السجل") { startActivity(Intent(this, MoviesActivity::class.java)) }, 1f)
+        bottom.add(btn("📚 مكتبتي") { startActivity(Intent(this, LibraryActivity::class.java)) }, 1f)
         bottom.add(btn("رابط مباشر") { askDirect() }, 1f)
         root.add(bottom)
         setContentView(root)
@@ -167,6 +168,7 @@ class MainActivity : AppCompatActivity() {
             ex.getString("user-agent")?.let { ua = it }
             @Suppress("DEPRECATION")
             val subsP = try { ex.getParcelableArray("subs") } catch (e: Exception) { null }
+            pendingPoster = ex.getString("poster") ?: ""
             subUrl = ex.getString("subtitle") ?: (subsP?.firstOrNull() as? Uri)?.toString()
                 ?: (try { ex.getStringArray("subs") } catch (e: Exception) { null })?.firstOrNull()
             @Suppress("DEPRECATION")
@@ -377,6 +379,7 @@ class MainActivity : AppCompatActivity() {
             if (u.startsWith("http") && ref.isNotEmpty()) addSubs(m)
             pendingSub?.let { if (it.startsWith("http")) m.subs.add(0, Sub(it, "ترجمة التطبيق")) }
             pendingSub = null
+            if (pendingPoster.isNotBlank()) { m.poster = pendingPoster; pendingPoster = "" }
             Store.add(m)
             val pos = pendingPos; pendingPos = 0L
             startActivity(Intent(this, MovieActivity::class.java).putExtra("id", m.id).putExtra("autocast", true).putExtra("pos", pos))
@@ -398,6 +401,7 @@ class MainActivity : AppCompatActivity() {
         if (u.startsWith("http") && ref.isNotEmpty()) addSubs(m)
         pendingSub?.let { s -> if (s.startsWith("http") && m.subs.none { it.url == s }) m.subs.add(0, Sub(s, "ترجمة التطبيق")) }
         pendingSub = null
+        if (pendingPoster.isNotBlank()) { m.poster = pendingPoster; pendingPoster = "" }
         m.watchedAt = System.currentTimeMillis()
         Store.movies.remove(m); Store.movies.add(0, m); Store.save()
         val pos = pendingPos.takeIf { it > 0 } ?: 0L; pendingPos = 0L

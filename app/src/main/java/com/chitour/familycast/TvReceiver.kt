@@ -109,6 +109,14 @@ class TvServer(private val ctx: Context) : NanoHTTPD(ReceiverService.PORT) {
             when (session.uri) {
                 "/info" -> json(JSONObject().put("app", "familycast").put("name", ctx.tvName()).toString())
                 "/status" -> json(TvActivity.statusJson)
+                "/history" -> json(TvLib.history())
+                "/library" -> {
+                    val files = HashMap<String, String>()
+                    session.parseBody(files)
+                    TvLib.save(JSONObject(files["postData"] ?: "{}"))
+                    main.post { TvActivity.instance?.libraryChanged() }
+                    json("{\"ok\":true}")
+                }
                 "/load", "/cmd" -> {
                     val files = HashMap<String, String>()
                     session.parseBody(files)

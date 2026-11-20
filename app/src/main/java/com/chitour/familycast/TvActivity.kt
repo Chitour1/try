@@ -49,6 +49,8 @@ class TvActivity : AppCompatActivity() {
     private var coverScale = 1.0f
     private lateinit var idle: LinearLayout
     private lateinit var info: TextView
+    private lateinit var shelves: LinearLayout
+    private lateinit var reader: SubReader
     private lateinit var note: TextView
     private lateinit var audio: AudioManager
     private var player: ExoPlayer? = null
@@ -90,10 +92,15 @@ class TvActivity : AppCompatActivity() {
         root.addView(pv, FrameLayout.LayoutParams(-1, -1))
         overlay = SceneOverlay(root, true)
 
-        idle = vbox().apply { gravity = Gravity.CENTER; setBackgroundColor(Color.parseColor("#0A3F4B")); setPadding(dp(48), dp(32), dp(48), dp(32)) }
-        idle.add(label("عرض عائلي", 44f, true).apply { setTextColor(Color.WHITE); gravity = Gravity.CENTER })
-        info = label("", 22f).apply { setTextColor(Color.parseColor("#E8F1F2")); gravity = Gravity.CENTER; setLineSpacing(0f, 1.3f) }
-        idle.add(info)
+        reader = SubReader(this)
+        idle = vbox().apply { setBackgroundColor(Theme.BG); setPadding(dp(32), dp(20), dp(32), dp(12)) }
+        val head = hbox().apply { gravity = Gravity.CENTER_VERTICAL }
+        head.add(label("عرض عائلي", 30f, true).apply { setTextColor(Theme.GOLD) })
+        info = label("", 14f).apply { setTextColor(Theme.MUTED); gravity = Gravity.END }
+        head.add(info, 1f)
+        idle.add(head)
+        shelves = vbox()
+        idle.add(android.widget.ScrollView(this).apply { addView(shelves); isFillViewport = true }, 1f)
         root.addView(idle, FrameLayout.LayoutParams(-1, -1))
 
         note = TextView(this).apply {
@@ -127,11 +134,72 @@ class TvActivity : AppCompatActivity() {
             }.setNegativeButton("لاحقًا", null).show()
     }
 
+    fun libraryChanged() { if (idle.visibility == View.VISIBLE) refreshIdle() }
+
+    private fun tvCard(j: JSONObject, w: Int = 150, h: Int = 220): View {
+        val (p, _, _) = TvLib.state(j)
+        val ser = j.optString("ser")
+        val title = if (ser.isNotBlank() && j.optInt("ep") > 0) "$ser • ${j.optInt("ep")}" else j.optString("title")
+        val sub = when { TvLib.finished(j) -> "✔ شوهد"; p > 0 -> "من ${Util.fmt(p / 1000.0)}"; else -> "جديد" }
+        return posterCard(title, sub, j.optString("po"), TvLib.progress(j), w, h, true, if (j.optBoolean("wl")) "⭐" else "", { playLib(j) })
+    }
+
+    private fun seriesTvCard(name: String): View {
+        val eps = TvLib.episodes(name)
+        val done = eps.count { TvLib.finished(it) }
+        return posterCard(name, "${eps.size} حلقة • شوهد $done", eps.firstOrNull { it.optString("po").isNotBlank() }?.optString("po") ?: "",
+            if (eps.isNotEmpty()) done * 100 / eps.size else 0, 150, 220, true, "مسلسل", { seriesTv(name) })
+    }
+
+    private fun seriesTv(name: String) {
+        val eps = TvLib.episodes(name)
+        val next = eps.firstOrNull { !TvLib.finished(it) }
+        val head = listOfNotNull(next?.let { "▶ تابع: الحلقة ${it.optInt("ep")}" })
+        val rows = eps.map { e -> "الحلقة ${e.optInt("ep")}: ${e.optString("title")}" +
+            when { TvLib.finished(e) -> "  ✔"; TvLib.progress(e) > 0 -> "  (${TvLib.progress(e)}٪)"; else -> "" } }
+        AlertDialog.Builder(this).setTitle(name).setItems((head + rows).toTypedArray()) { _, i ->
+            if (next != null && i == 0) playLib(next) else playLib(eps[i - head.size])
+        }.show()
+    }
+
+    /** تشغيل من مكتبة التلفاز مباشرة، دون الهاتف */
+    private fun playLib(j: JSONObject) {
+        val c = JSONObject(j.toString())
+        val (p, _, _) = TvLib.state(j)
+        c.put("start", if (p > 60_000 && !TvLib.finished(j)) p - 5000 else 0L)
+        c.put("tts", reader.mode)
+        load(c)
+    }
+
     private fun refreshIdle() {
-        info.text = "جهاز الاستقبال جاهز باسم: «${tvName()}»\n" +
-            "عنوانه في الشبكة: ${Proxy.localIp() ?: "غير متصل"}\n\n" +
-            "على الهاتف: افتح «عرض عائلي»، واختر هذا التلفاز من زر «الجهاز»،\nثم اضغط «اعرض على التلفاز».\n\n" +
-            "أثناء العرض: ◀ ▶ للتقديم والتأخير 10 ثوانٍ • زر القائمة للجودة • «رجوع» مرتين للإيقاف"
+        info.text = "«${tvName()}» • ${Proxy.localIp() ?: "غير متصل"}\n◀ ▶ تقديم وتأخير • القائمة: الجودة والقراءة • «رجوع» مرتين: إيقاف"
+        shelves.removeAllViews()
+        val items = TvLib.items()
+        if (items.isEmpty()) {
+            shelves.add(label("المكتبة فارغة.\n\nعلى الهاتف: افتح «عرض عائلي»، واختر هذا التلفاز من زر «📺 الجهاز»، ثم اضغط «اعرض على التلفاز».\n" +
+                "وكل ما تحفظه في «مكتبتي» على الهاتف يظهر هنا لتشغّله من التلفاز مباشرة.", 22f).apply {
+                setTextColor(Theme.TEXT); gravity = Gravity.CENTER; setPadding(dp(40), dp(60), dp(40), 0); setLineSpacing(0f, 1.3f) })
+            return
+        }
+        val cont = TvLib.continueWatching()
+        if (cont.isNotEmpty()) shelves.add(shelf("▶ متابعة المشاهدة", cont.map { tvCard(it, 230, 140) }, true))
+        val wl = items.filter { it.optBoolean("wl") }
+        if (wl.isNotEmpty()) shelves.add(shelf("⭐ قائمة المشاهدة", wl.map { tvCard(it) }, true))
+        val secs = (TvLib.sections() + items.map { it.optString("sec") }).filter { it.isNotBlank() }.distinct()
+        for (sec in secs) {
+            val its = items.filter { it.optString("sec") == sec }
+            if (its.isEmpty()) continue
+            val cards = mutableListOf<View>(); val done = HashSet<String>()
+            for (j in its) { val s = j.optString("ser"); if (s.isBlank()) cards.add(tvCard(j)) else if (done.add(s)) cards.add(seriesTvCard(s)) }
+            shelves.add(shelf("📁 $sec", cards, true))
+        }
+        h.post { shelves.focusSearch(View.FOCUS_DOWN); findFirstCard(shelves)?.requestFocus() }
+    }
+
+    private fun findFirstCard(v: View): View? {
+        if (v.isFocusable && v !is android.widget.ScrollView && v !is android.widget.HorizontalScrollView && v != shelves) return v
+        if (v is android.view.ViewGroup) for (i in 0 until v.childCount) findFirstCard(v.getChildAt(i))?.let { return it }
+        return null
     }
 
     private fun show(s: String, ms: Long = 3000) {
@@ -157,6 +225,7 @@ class TvActivity : AppCompatActivity() {
         val dur = p.duration
         val keep = if (dur > 0 && p.currentPosition > dur - 120_000) 0L else p.currentPosition
         Store.setPref("tvpos_$movieId", keep.toString())
+        TvLib.record(movieId, p.currentPosition, dur)
     }
 
     fun load(j: JSONObject) {
@@ -169,6 +238,7 @@ class TvActivity : AppCompatActivity() {
         skipOn = j.optBoolean("skip", true)
         subsOn = j.optBoolean("subsOn", true)
         failed = false; retries = 0; okTicks = 0
+        if (j.has("tts")) reader.mode = j.optInt("tts")
 
         val (uaLine, extra) = Util.splitHeaders(j.optString("ua"))
         val ds = DefaultHttpDataSource.Factory().setAllowCrossProtocolRedirects(true)
@@ -208,7 +278,17 @@ class TvActivity : AppCompatActivity() {
                 } else { failed = true; show("تعذّر تشغيل الفيلم. قد يكون الرابط انتهى، فالتقطه من جديد على الهاتف", 8000) }
             }
             override fun onPlaybackStateChanged(state: Int) {
-                if (state == Player.STATE_ENDED) { show("انتهى الفيلم"); Store.setPref("tvpos_$movieId", "0") }
+                if (state == Player.STATE_ENDED) {
+                    savePos(); Store.setPref("tvpos_$movieId", "0")
+                    val nx = TvLib.next(movieId)
+                    if (nx != null) overlay.showCard("الحلقة ${nx.optInt("ep")}: ${nx.optString("title")}", 8000L, "الحلقة التالية • موافق للتشغيل الآن") { playLib(nx) }
+                    else show("انتهى الفيلم")
+                }
+            }
+            override fun onCues(cueGroup: androidx.media3.common.text.CueGroup) {
+                if (mutedBySkip) return
+                val t = cueGroup.cues.joinToString(" ") { it.text?.toString() ?: "" }
+                if (t.isNotBlank()) reader.speak(t)
             }
         })
         p.setMediaItem(item)
@@ -224,10 +304,13 @@ class TvActivity : AppCompatActivity() {
         show(if (start > 0) "▶ $mTitle — أكمل من ${Util.fmt(start / 1000.0)}" else "▶ $mTitle", 4000)
     }
 
+    private var subScaleV = 1.3f
     private fun applySubs(scale: Float) {
+        subScaleV = scale
         val p = player ?: return
         p.trackSelectionParameters = p.trackSelectionParameters.buildUpon()
-            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, !subsOn).setPreferredTextLanguage("ar").build()
+            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, !subsOn && reader.mode == 0).setPreferredTextLanguage("ar").build()
+        pv.subtitleView?.visibility = if (subsOn) View.VISIBLE else View.INVISIBLE
         pv.subtitleView?.apply {
             setFractionalTextSize(SubtitleView.DEFAULT_TEXT_SIZE_FRACTION * scale)
             setStyle(CaptionStyleCompat(Color.WHITE, Color.argb(110, 0, 0, 0), Color.TRANSPARENT,
@@ -258,6 +341,19 @@ class TvActivity : AppCompatActivity() {
         p.trackSelectionParameters = b.build()
     }
 
+    private fun tvMenu() {
+        AlertDialog.Builder(this).setTitle("الخيارات")
+            .setItems(arrayOf("الجودة", "قراءة الترجمة بصوت: " + SubReader.names[reader.mode.coerceIn(0, 2)], if (subsOn) "إخفاء الترجمة" else "إظهار الترجمة", if (skipOn) "إيقاف التجاوز" else "تفعيل التجاوز")) { _, i ->
+                when (i) {
+                    0 -> qualityDialog()
+                    1 -> AlertDialog.Builder(this).setTitle("قراءة الترجمة بصوت").setItems(SubReader.names.toTypedArray()) { _, k ->
+                        cmd(JSONObject().put("a", "tts").put("mode", k)) }.show()
+                    2 -> { subsOn = !subsOn; applySubs(subScaleV) }
+                    3 -> { skipOn = !skipOn; show(if (skipOn) "التجاوز مفعّل" else "التجاوز متوقف") }
+                }
+            }.show()
+    }
+
     private fun qualityDialog() {
         val q = qualities()
         if (q.isEmpty()) { show("لا جودات أخرى لهذا الفيلم"); return }
@@ -268,6 +364,7 @@ class TvActivity : AppCompatActivity() {
 
     private fun stopPlayback() {
         savePos()
+        reader.stop()
         overlay.hideAll()
         try { player?.release() } catch (e: Exception) { }
         player = null; pv.player = null
@@ -291,6 +388,8 @@ class TvActivity : AppCompatActivity() {
             "subs" -> { subsOn = j.optBoolean("on", true); applySubs(j.optDouble("scale", 1.3).toFloat()) }
             "subscale" -> applySubs(j.optDouble("v", 1.3).toFloat())
             "coverscale" -> coverScale = j.optDouble("v", 1.0).toFloat()
+            "tts" -> { reader.mode = j.optInt("mode"); applySubs(subScaleV)
+                show("قراءة الترجمة: " + SubReader.names[reader.mode.coerceIn(0, 2)] + if (reader.mode != 0 && !reader.arabicOk()) " (ثبّت الصوت العربي من إعدادات التلفاز)" else "") }
             "card" -> overlay.finishCard()
             "quality" -> setQuality(j.optInt("h"))
             "rename" -> { Store.setPref("tvName", j.optString("name")); refreshIdle() }
@@ -309,13 +408,15 @@ class TvActivity : AppCompatActivity() {
             if (seg != null && !seg.playsThrough() && now - lastSeek > 800) {
                 lastSeek = now
                 p.seekTo((seg.end * 1000).toLong())
-                if (seg.note.isNotBlank()) { p.pause(); overlay.showCard(seg.note) { player?.play() } }
+                if (seg.note.isNotBlank()) { p.pause(); reader.speak(seg.note, reader.mode != 0); overlay.showCard(seg.note) { reader.stop(); player?.play() } }
                 else show("⏭ تجاوزت مقطعًا", 2000)
             }
             val through = seg?.takeIf { it.playsThrough() }
             overlay.cover(through, if (through != null) ((sec - through.start) * 1000).toLong().coerceAtLeast(0L) else 0L, coverScale)
-            if (seg?.mute == true) { if (!mutedBySkip) { mutedBySkip = true; p.volume = 0f; show("🔇 كتم مؤقت", 2000) } }
-            else if (mutedBySkip) { mutedBySkip = false; p.volume = 1f }
+            if (seg?.mute == true) { if (!mutedBySkip) { mutedBySkip = true; reader.stop(); show("🔇 كتم مؤقت", 2000) } }
+            else if (mutedBySkip) { mutedBySkip = false }
+            val vol = if (mutedBySkip) 0f else reader.filmVolume()
+            if (p.volume != vol) p.volume = vol
             if (now - lastSave > 5000) { lastSave = now; savePos() }
         }
         val max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
@@ -333,7 +434,7 @@ class TvActivity : AppCompatActivity() {
             .put("pos", p?.currentPosition ?: 0L).put("dur", p?.duration?.takeIf { it > 0 } ?: 0L)
             .put("vol", audio.getStreamVolume(AudioManager.STREAM_MUSIC) * 100 / max)
             .put("mute", audio.isStreamMute(AudioManager.STREAM_MUSIC))
-            .put("skip", skipOn).put("subsOn", subsOn).put("card", overlay.cardActive).put("qualities", q).put("msg", msg)
+            .put("skip", skipOn).put("subsOn", subsOn).put("card", overlay.cardActive).put("tts", reader.mode).put("qualities", q).put("msg", msg)
             .put("name", tvName())
             .toString()
     }
@@ -350,7 +451,7 @@ class TvActivity : AppCompatActivity() {
                 KeyEvent.KEYCODE_DPAD_RIGHT -> { p.seekTo(p.currentPosition + 10_000); show("⏩ 10 ثوانٍ", 1200); return true }
             }
             when (e.keyCode) {
-                KeyEvent.KEYCODE_MENU, KeyEvent.KEYCODE_SETTINGS -> { qualityDialog(); return true }
+                KeyEvent.KEYCODE_MENU, KeyEvent.KEYCODE_SETTINGS -> { tvMenu(); return true }
                 KeyEvent.KEYCODE_BACK -> {
                     if (pv.isControllerFullyVisible) { pv.hideController(); return true }
                     val now = SystemClock.elapsedRealtime()
@@ -374,6 +475,7 @@ class TvActivity : AppCompatActivity() {
         try { player?.release() } catch (e: Exception) { }
         player = null
         if (instance === this) instance = null
+        reader.shutdown()
         statusJson = "{\"state\":\"idle\"}"
         super.onDestroy()
     }

@@ -30,13 +30,25 @@ class Movie(
     var variantLabel: String = "",
     var pos: Long = 0L,
     var dur: Long = 0L,
-    var watchedAt: Long = 0L
-)
+    var watchedAt: Long = 0L,
+    var section: String = "أفلام",
+    var series: String = "",
+    var ep: Int = 0,
+    var watch: Boolean = false,
+    var poster: String = ""
+) {
+    fun finished() = dur > 0 && pos >= dur - 120_000
+    fun progress(): Int = if (dur > 0) (pos * 100 / dur).toInt().coerceIn(0, 100) else 0
+    fun isLocal() = url.startsWith("content://") || url.startsWith("file://")
+}
 
 object Store {
     private lateinit var prefs: SharedPreferences
     val movies = mutableListOf<Movie>()
     var skipEnabled = true
+    var ttsMode: Int
+        get() = prefs.getInt("ttsMode", 0)
+        set(v) { prefs.edit().putInt("ttsMode", v).apply() }
     var coverScale: Float
         get() = prefs.getFloat("coverScale", 1.0f)
         set(v) { prefs.edit().putFloat("coverScale", v).apply() }
@@ -65,6 +77,8 @@ object Store {
             for (j in 0 until ua.length()) { val x = ua.getJSONObject(j); m.subs.add(Sub(x.optString("u"), x.optString("l"))) }
             m.subsOn = o.optBoolean("subsOn", true)
             m.variant = o.optString("variant"); m.variantLabel = o.optString("variantLabel")
+            m.section = o.optString("sec", "أفلام").ifBlank { "أفلام" }; m.series = o.optString("ser"); m.ep = o.optInt("ep")
+            m.watch = o.optBoolean("wl"); m.poster = o.optString("po")
             m.pos = o.optLong("pos"); m.dur = o.optLong("dur"); m.watchedAt = o.optLong("watchedAt", o.optString("id").toLongOrNull() ?: 0L)
             movies.add(m)
         }
@@ -77,13 +91,30 @@ object Store {
             for (s in m.segments) sa.put(JSONObject().put("s", s.start).put("e", s.end).put("m", s.mute).put("n", s.note).put("c", s.cover))
             val ua = JSONArray()
             for (x in m.subs) ua.put(JSONObject().put("u", x.url).put("l", x.label))
-            arr.put(JSONObject().put("subs", ua).put("subsOn", m.subsOn).put("variant", m.variant).put("variantLabel", m.variantLabel).put("pos", m.pos).put("dur", m.dur).put("watchedAt", m.watchedAt).put("id", m.id).put("title", m.title).put("url", m.url)
+            arr.put(JSONObject().put("subs", ua).put("subsOn", m.subsOn).put("variant", m.variant).put("variantLabel", m.variantLabel).put("pos", m.pos).put("dur", m.dur).put("watchedAt", m.watchedAt).put("sec", m.section).put("ser", m.series).put("ep", m.ep).put("wl", m.watch).put("po", m.poster).put("id", m.id).put("title", m.title).put("url", m.url)
                 .put("referer", m.referer).put("ua", m.userAgent).put("proxy", m.useProxy).put("segments", sa))
         }
         prefs.edit().putString("movies", arr.toString()).apply()
     }
 
     fun get(id: String) = movies.firstOrNull { it.id == id }
+
+    // ---- المكتبة ----
+    var sections: List<String>
+        get() = try { val a = JSONArray(prefs.getString("sections", null) ?: throw Exception()); (0 until a.length()).map { a.getString(it) } }
+                catch (e: Exception) { listOf("أفلام", "مسلسلات", "وثائقيات", "للأطفال") }
+        set(v) { prefs.edit().putString("sections", JSONArray(v).toString()).apply() }
+
+    fun episodes(series: String) = movies.filter { it.series == series }.sortedBy { it.ep }
+    fun nextEpisode(m: Movie): Movie? = if (m.series.isBlank()) null else episodes(m.series).firstOrNull { it.ep > m.ep }
+
+    /** متابعة المشاهدة: ما بدأته ولم تكمله، وفي المسلسل آخر حلقة فقط */
+    fun continueWatching(): List<Movie> {
+        val list = movies.filter { it.pos > 60_000 && !it.finished() }.sortedByDescending { it.watchedAt }
+        val seen = HashSet<String>()
+        return list.filter { it.series.isBlank() || seen.add(it.series) }
+    }
+    fun archive() = movies.filter { it.pos > 0 || it.watchedAt > 0 }.sortedByDescending { it.watchedAt }
 
     fun pref(k: String): String = prefs.getString(k, "") ?: ""
     fun setPref(k: String, v: String) { prefs.edit().putString(k, v).apply() }

@@ -58,9 +58,15 @@ class MovieActivity : AppCompatActivity() {
     private lateinit var titleBox: EditText
     private lateinit var urlBox: EditText
     private lateinit var proxyChk: CheckBox
+    private lateinit var seriesBox: EditText
+    private lateinit var epBox: EditText
+    private lateinit var watchChk: CheckBox
+    private lateinit var secBtn: Button
     private lateinit var playerView: PlayerView
     private lateinit var pvBox: android.widget.FrameLayout
     private lateinit var overlay: SceneOverlay
+    private lateinit var reader: SubReader
+    private lateinit var ttsBtn: Button
     private lateinit var localBtn: Button
     private var player: ExoPlayer? = null
     private var castCtx: CastContext? = null
@@ -140,6 +146,7 @@ class MovieActivity : AppCompatActivity() {
         playerView = PlayerView(this)
         pvBox.addView(playerView, android.widget.FrameLayout.LayoutParams(-1, -1))
         overlay = SceneOverlay(pvBox, false)
+        reader = SubReader(this).also { it.mode = Store.ttsMode }
         col.add(pvBox, h = dp(220))
 
         // ---- جهاز التحكم ----
@@ -232,6 +239,8 @@ class MovieActivity : AppCompatActivity() {
         sr.add(btn("الخط −") { subScale(-0.15f) }, 0.6f)
         sr.add(btn("الخط +") { subScale(0.15f) }, 0.6f)
         col.add(sr)
+        ttsBtn = btn("🔊 قراءة الترجمة بصوت: " + SubReader.names[Store.ttsMode.coerceIn(0, 2)]) { chooseTts() }
+        col.add(ttsBtn)
         val cr = hbox().apply { gravity = Gravity.CENTER_VERTICAL }
         cr.add(label("حجم الغطاء الأسود:", 14f), 1f)
         cr.add(btn("أصغر") { coverScale(-0.15f) }, 0.6f)
@@ -244,6 +253,22 @@ class MovieActivity : AppCompatActivity() {
         col.add(titleBox)
         urlBox = EditText(this).apply { hint = "رابط الفيديو"; setText(movie.url); textSize = 12f; maxLines = 3 }
         col.add(urlBox)
+        val libRow = hbox().apply { gravity = Gravity.CENTER_VERTICAL }
+        secBtn = btn("📁 القسم: ${movie.section}") {
+            val secs = Store.sections
+            AlertDialog.Builder(this).setTitle("القسم").setItems(secs.toTypedArray()) { _, i ->
+                movie.section = secs[i]; secBtn.text = "📁 القسم: ${movie.section}"; Store.save() }.show()
+        }
+        libRow.add(secBtn, 1f)
+        watchChk = CheckBox(this).apply { text = "⭐ قائمة المشاهدة"; isChecked = movie.watch }
+        libRow.add(watchChk)
+        col.add(libRow)
+        val serRow = hbox()
+        seriesBox = EditText(this).apply { hint = "اسم المسلسل (إن كان حلقة)"; setText(movie.series) }
+        serRow.add(seriesBox, 1f)
+        epBox = EditText(this).apply { hint = "رقم الحلقة"; inputType = InputType.TYPE_CLASS_NUMBER; setText(if (movie.ep > 0) "${movie.ep}" else "") }
+        serRow.add(epBox, 0.5f)
+        col.add(serRow)
         proxyChk = CheckBox(this).apply { text = "تمرير الفيديو عبر الهاتف (يُختار تلقائيًا إذا رفض التلفاز الرابط)"; isChecked = movie.useProxy }
         col.add(proxyChk)
 
@@ -411,6 +436,16 @@ class MovieActivity : AppCompatActivity() {
         if (casting()) reloadHere()
     }
 
+    private fun chooseTts() {
+        AlertDialog.Builder(this).setTitle("قراءة الترجمة بصوت")
+            .setItems(arrayOf("متوقفة", "تقرأ مع خفض صوت الفيلم أثناء القراءة", "تقرأ بدل صوت الفيلم")) { _, k ->
+                Store.ttsMode = k; reader.mode = k
+                ttsBtn.text = "🔊 قراءة الترجمة بصوت: " + SubReader.names[k]
+                if (tvActive()) TvLink.cmd("tts", "mode" to k)
+                if (k != 0 && movie.subs.isEmpty()) toast("أضف ترجمة للفيلم أولًا، فالقراءة تكون من الترجمة")
+            }.show()
+    }
+
     private fun coverScale(d: Float) {
         Store.coverScale = (Store.coverScale + d).coerceIn(0.5f, 2.5f)
         if (tvActive()) TvLink.cmd("coverscale", "v" to Store.coverScale.toDouble())
@@ -465,6 +500,9 @@ class MovieActivity : AppCompatActivity() {
         val newUrl = urlBox.text.toString().trim()
         if (newUrl != movie.url) { movie.url = newUrl; movie.variant = ""; movie.variantLabel = "" }
         movie.useProxy = proxyChk.isChecked
+        movie.watch = watchChk.isChecked
+        movie.series = seriesBox.text.toString().trim()
+        movie.ep = epBox.text.toString().toIntOrNull() ?: if (movie.series.isNotBlank() && movie.ep == 0) (Store.episodes(movie.series).maxOfOrNull { it.ep } ?: 0) + 1 else movie.ep
         title = movie.title
         Store.save()
     }
@@ -590,13 +628,15 @@ class MovieActivity : AppCompatActivity() {
     private fun volume(d: Double) {
         if (tvActive()) TvLink.cmd("vol", "d" to (if (d > 0) 1 else -1))
         else if (CastCtl.session() != null) CastCtl.volume(d)
-        else player?.let { it.volume = (it.volume + d.toFloat()).coerceIn(0f, 1f) }
+        else (getSystemService(AUDIO_SERVICE) as android.media.AudioManager).adjustStreamVolume(android.media.AudioManager.STREAM_MUSIC,
+            if (d > 0) android.media.AudioManager.ADJUST_RAISE else android.media.AudioManager.ADJUST_LOWER, android.media.AudioManager.FLAG_SHOW_UI)
     }
 
     private fun muteToggle() {
         if (tvActive()) TvLink.cmd("mute")
         else if (CastCtl.session() != null) CastCtl.toggleMute()
-        else player?.let { it.volume = if (it.volume > 0f) 0f else 1f }
+        else (getSystemService(AUDIO_SERVICE) as android.media.AudioManager).adjustStreamVolume(android.media.AudioManager.STREAM_MUSIC,
+            android.media.AudioManager.ADJUST_TOGGLE_MUTE, android.media.AudioManager.FLAG_SHOW_UI)
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
@@ -631,9 +671,21 @@ class MovieActivity : AppCompatActivity() {
         if (movie.referer.isNotEmpty()) props["Referer"] = movie.referer
         if (props.isNotEmpty()) ds.setDefaultRequestProperties(props)
         val p = ExoPlayer.Builder(this).setMediaSourceFactory(DefaultMediaSourceFactory(this).setDataSourceFactory(DefaultDataSource.Factory(this, ds))).build()
-        val item = MediaItem.Builder().setUri(src).apply {
+        val subsCfg = movie.subs.mapIndexed { i, s ->
+            MediaItem.SubtitleConfiguration.Builder(Uri.parse(s.url))
+                .setMimeType(if (s.url.startsWith("file") || s.url.lowercase().contains(".vtt")) MimeTypes.TEXT_VTT else MimeTypes.APPLICATION_SUBRIP)
+                .setLanguage("ar").setLabel(s.label).setSelectionFlags(if (i == 0) C.SELECTION_FLAG_DEFAULT else 0).build()
+        }
+        val item = MediaItem.Builder().setUri(src).setSubtitleConfigurations(subsCfg).apply {
             if (src.lowercase().contains("m3u8")) setMimeType(MimeTypes.APPLICATION_M3U8)
         }.build()
+        p.addListener(object : androidx.media3.common.Player.Listener {
+            override fun onCues(cueGroup: androidx.media3.common.text.CueGroup) {
+                if (lastMutedBySkip) return
+                val t = cueGroup.cues.joinToString(" ") { it.text?.toString() ?: "" }
+                if (t.isNotBlank()) reader.speak(t)
+            }
+        })
         p.setMediaItem(item)
         p.prepare()
         if (CastCtl.movie === movie && CastCtl.lastPos > 0) p.seekTo(CastCtl.lastPos)
@@ -712,11 +764,13 @@ class MovieActivity : AppCompatActivity() {
         if (seg != null && !seg.playsThrough() && now - lastLocalSeek > 800) {
             lastLocalSeek = now
             p.seekTo((seg.end * 1000).toLong())
-            if (seg.note.isNotBlank()) { p.pause(); overlay.showCard(seg.note) { player?.play() } }
+            if (seg.note.isNotBlank()) { p.pause(); reader.speak(seg.note, reader.mode != 0); overlay.showCard(seg.note) { reader.stop(); player?.play() } }
         }
         val through = seg?.takeIf { it.playsThrough() }
         overlay.cover(through, if (through != null) ((pos - through.start) * 1000).toLong().coerceAtLeast(0L) else 0L, Store.coverScale)
-        if (seg?.mute == true) p.volume = 0f else if (p.volume == 0f && lastMutedBySkip) p.volume = 1f
+        if (seg?.mute == true && !lastMutedBySkip) reader.stop()
+        val vol = if (seg?.mute == true) 0f else reader.filmVolume()
+        if (p.volume != vol) p.volume = vol
         lastMutedBySkip = seg?.mute == true
         volText.text = "${(p.volume * 100).toInt()}٪"
         showPos(p.currentPosition, duration())
@@ -747,6 +801,7 @@ class MovieActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         player?.release(); player = null
+        if (::reader.isInitialized) reader.shutdown()
         super.onDestroy()
     }
 }

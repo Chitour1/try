@@ -60,13 +60,13 @@ class SceneOverlay(private val root: FrameLayout, private val big: Boolean) {
     private fun px(dp: Int) = (dp * ctx.resources.displayMetrics.density).toInt()
 
     /** يعرض الملخص شريحة بعد شريحة ثم ينادي done */
-    fun showCard(text: String, done: () -> Unit) {
+    fun showCard(text: String, minMs: Long = 0L, head: String? = null, done: () -> Unit) {
         val slides = Util.slides(text)
         if (slides.isEmpty()) { done(); return }
         cardActive = true
         onDone = done
         val ar = Util.isArabic(text)
-        cardHead.text = if (ar) "ملخص المشهد المحذوف" else "Skipped scene summary"
+        cardHead.text = head ?: if (ar) "ملخص المشهد المحذوف" else "Skipped scene summary"
         card.visibility = View.VISIBLE
         var i = 0
         fun step() {
@@ -74,7 +74,7 @@ class SceneOverlay(private val root: FrameLayout, private val big: Boolean) {
             if (i >= slides.size) { finishCard(); return }
             cardText.text = slides[i]
             cardFoot.text = if (slides.size > 1) "${i + 1} / ${slides.size}" else ""
-            val ms = Util.slideMs(slides[i])
+            val ms = maxOf(Util.slideMs(slides[i]), minMs)
             i++
             h.postDelayed({ step() }, ms)
         }

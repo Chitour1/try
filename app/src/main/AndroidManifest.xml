@@ -61,6 +61,7 @@
             </intent-filter>
         </activity>
         <activity android:name=".MoviesActivity"/>
+        <activity android:name=".LibraryActivity"/>
         <activity android:name=".MovieActivity"
             android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|smallestScreenSize"/>
         <activity android:name=".TvActivity" android:exported="true"
