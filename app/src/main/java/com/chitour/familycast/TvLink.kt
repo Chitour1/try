@@ -248,6 +248,6 @@ object TvLink {
             .put("referer", m.referer).put("ua", m.userAgent).put("start", startMs)
             .put("segments", segJson(m)).put("skip", Store.skipEnabled)
             .put("subs", subs).put("subsOn", m.subsOn).put("subScale", Store.subScale.toDouble())
-            .put("coverScale", Store.coverScale.toDouble()).put("tts", Store.ttsMode)
+            .put("coverScale", Store.coverScale.toDouble()).put("tts", Store.ttsMode).put("wps", Store.wps.toDouble()).put("readCards", Store.readCards)
     }
 }

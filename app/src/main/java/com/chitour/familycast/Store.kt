@@ -46,6 +46,14 @@ object Store {
     private lateinit var prefs: SharedPreferences
     val movies = mutableListOf<Movie>()
     var skipEnabled = true
+    /** سرعة قراءة الملخص: كلمات في الثانية */
+    var wps: Float
+        get() = prefs.getFloat("wps", 3f)
+        set(v) { prefs.edit().putFloat("wps", v).apply() }
+    /** قراءة الملخص بصوت: متوقفة إلا إذا اختارها المستخدم */
+    var readCards: Boolean
+        get() = prefs.getBoolean("readCards", false)
+        set(v) { prefs.edit().putBoolean("readCards", v).apply() }
     var ttsMode: Int
         get() = prefs.getInt("ttsMode", 0)
         set(v) { prefs.edit().putInt("ttsMode", v).apply() }
@@ -242,14 +250,28 @@ object Util {
         return out
     }
 
-    // ---- شرائح الملخص: 50 كلمة في الشريحة، وكل 5 كلمات ثانية ----
+    // ---- شرائح الملخص: 50 كلمة في الشريحة، والسرعة يختارها المستخدم (الافتراضي 3 كلمات في الثانية) ----
+    /** الكلمة: ما فيه حرف أو رقم (لا تُحسب الشرطات وعلامات الترقيم وحدها) */
+    fun words(text: String): List<String> =
+        text.trim().split(Regex("""\s+""")).filter { w -> w.any { it.isLetterOrDigit() } }
+
+    /** الشريحة 50 كلمة على الأكثر، وما زاد ينتقل إلى شريحة تالية */
     fun slides(text: String): List<String> {
-        val w = text.trim().split(Regex("""\s+""")).filter { it.isNotEmpty() }
-        return w.chunked(50).map { it.joinToString(" ") }
+        val all = text.trim().split(Regex("""\s+""")).filter { it.isNotEmpty() }
+        val out = mutableListOf<String>(); var cur = mutableListOf<String>(); var n = 0
+        for (t in all) {
+            val isWord = t.any { it.isLetterOrDigit() }
+            if (isWord && n == 50) { out.add(cur.joinToString(" ")); cur = mutableListOf(); n = 0 }
+            cur.add(t); if (isWord) n++
+        }
+        if (cur.isNotEmpty() && n > 0) out.add(cur.joinToString(" "))
+        return out
     }
+
+    /** مدة الشريحة بحسب سرعة القراءة المختارة (الافتراضي 3 كلمات في الثانية) */
     fun slideMs(slide: String): Long {
-        val n = slide.trim().split(Regex("""\s+""")).count { it.isNotEmpty() }
-        return maxOf(2500L, n * 200L)
+        val n = words(slide).size
+        return maxOf(2000L, (n * 1000f / Store.wps).toLong())
     }
     fun totalMs(text: String): Long = slides(text).sumOf { slideMs(it) }
     fun isArabic(t: String) = t.any { it in '\u0600'..'\u06FF' }

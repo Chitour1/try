@@ -167,7 +167,7 @@ class TvActivity : AppCompatActivity() {
         val c = JSONObject(j.toString())
         val (p, _, _) = TvLib.state(j)
         c.put("start", if (p > 60_000 && !TvLib.finished(j)) p - 5000 else 0L)
-        c.put("tts", reader.mode)
+        c.put("tts", reader.mode); c.put("wps", Store.wps.toDouble()); c.put("readCards", Store.readCards)
         load(c)
     }
 
@@ -239,6 +239,8 @@ class TvActivity : AppCompatActivity() {
         subsOn = j.optBoolean("subsOn", true)
         failed = false; retries = 0; okTicks = 0
         if (j.has("tts")) reader.mode = j.optInt("tts")
+        if (j.has("wps")) Store.wps = j.optDouble("wps", 3.0).toFloat()
+        if (j.has("readCards")) Store.readCards = j.optBoolean("readCards")
 
         val (uaLine, extra) = Util.splitHeaders(j.optString("ua"))
         val ds = DefaultHttpDataSource.Factory().setAllowCrossProtocolRedirects(true)
@@ -341,15 +343,22 @@ class TvActivity : AppCompatActivity() {
         p.trackSelectionParameters = b.build()
     }
 
+    private val WPS = listOf(1.5f, 2f, 2.5f, 3f, 3.5f, 4f, 5f)
+    private fun fmtWps(v: Float) = if (v % 1f == 0f) v.toInt().toString() else v.toString()
+
     private fun tvMenu() {
         AlertDialog.Builder(this).setTitle("الخيارات")
-            .setItems(arrayOf("الجودة", "قراءة الترجمة بصوت: " + SubReader.names[reader.mode.coerceIn(0, 2)], if (subsOn) "إخفاء الترجمة" else "إظهار الترجمة", if (skipOn) "إيقاف التجاوز" else "تفعيل التجاوز")) { _, i ->
+            .setItems(arrayOf("الجودة", "قراءة الترجمة بصوت: " + SubReader.names[reader.mode.coerceIn(0, 2)], if (subsOn) "إخفاء الترجمة" else "إظهار الترجمة", if (skipOn) "إيقاف التجاوز" else "تفعيل التجاوز",
+                "سرعة الملخص: ${fmtWps(Store.wps)} كلمات في الثانية", "قراءة الملخص بصوت: " + if (Store.readCards) "مفعّلة" else "متوقفة")) { _, i ->
                 when (i) {
                     0 -> qualityDialog()
                     1 -> AlertDialog.Builder(this).setTitle("قراءة الترجمة بصوت").setItems(SubReader.names.toTypedArray()) { _, k ->
                         cmd(JSONObject().put("a", "tts").put("mode", k)) }.show()
                     2 -> { subsOn = !subsOn; applySubs(subScaleV) }
                     3 -> { skipOn = !skipOn; show(if (skipOn) "التجاوز مفعّل" else "التجاوز متوقف") }
+                    4 -> AlertDialog.Builder(this).setTitle("سرعة الملخص (كلمات في الثانية)").setItems(WPS.map { fmtWps(it) + if (it == 3f) " (عادية)" else "" }.toTypedArray()) { _, k ->
+                        cmd(JSONObject().put("a", "wps").put("v", WPS[k].toDouble())) }.show()
+                    5 -> cmd(JSONObject().put("a", "readcards").put("on", !Store.readCards))
                 }
             }.show()
     }
@@ -388,6 +397,8 @@ class TvActivity : AppCompatActivity() {
             "subs" -> { subsOn = j.optBoolean("on", true); applySubs(j.optDouble("scale", 1.3).toFloat()) }
             "subscale" -> applySubs(j.optDouble("v", 1.3).toFloat())
             "coverscale" -> coverScale = j.optDouble("v", 1.0).toFloat()
+            "wps" -> { Store.wps = j.optDouble("v", 3.0).toFloat(); show("سرعة الملخص: ${fmtWps(Store.wps)} كلمات في الثانية") }
+            "readcards" -> { Store.readCards = j.optBoolean("on"); if (!Store.readCards) reader.stop(); show(if (Store.readCards) "قراءة الملخص بصوت: مفعّلة" else "قراءة الملخص بصوت: متوقفة") }
             "tts" -> { reader.mode = j.optInt("mode"); applySubs(subScaleV)
                 show("قراءة الترجمة: " + SubReader.names[reader.mode.coerceIn(0, 2)] + if (reader.mode != 0 && !reader.arabicOk()) " (ثبّت الصوت العربي من إعدادات التلفاز)" else "") }
             "card" -> overlay.finishCard()
@@ -408,7 +419,7 @@ class TvActivity : AppCompatActivity() {
             if (seg != null && !seg.playsThrough() && now - lastSeek > 800) {
                 lastSeek = now
                 p.seekTo((seg.end * 1000).toLong())
-                if (seg.note.isNotBlank()) { p.pause(); reader.speak(seg.note, reader.mode != 0); overlay.showCard(seg.note) { reader.stop(); player?.play() } }
+                if (seg.note.isNotBlank()) { p.pause(); if (Store.readCards) reader.speak(seg.note, true); overlay.showCard(seg.note) { reader.stop(); player?.play() } }
                 else show("⏭ تجاوزت مقطعًا", 2000)
             }
             val through = seg?.takeIf { it.playsThrough() }

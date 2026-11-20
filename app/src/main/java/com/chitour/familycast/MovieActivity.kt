@@ -67,6 +67,18 @@ class MovieActivity : AppCompatActivity() {
     private lateinit var overlay: SceneOverlay
     private lateinit var reader: SubReader
     private lateinit var ttsBtn: Button
+    private lateinit var wpsBtn: Button
+    private val WPS = listOf(1.5f, 2f, 2.5f, 3f, 3.5f, 4f, 5f)
+    private fun fmtWps(v: Float) = if (v % 1f == 0f) v.toInt().toString() else v.toString()
+
+    private fun chooseWps() {
+        AlertDialog.Builder(this).setTitle("سرعة عرض الملخص (كلمات في الثانية)")
+            .setItems(WPS.map { fmtWps(it) + (if (it == 3f) " (عادية)" else if (it < 3f) " (أبطأ)" else " (أسرع)") }.toTypedArray()) { _, k ->
+                Store.wps = WPS[k]
+                wpsBtn.text = "⏱ سرعة الملخص: ${fmtWps(Store.wps)} كلمات/ث"
+                if (tvActive()) TvLink.cmd("wps", "v" to Store.wps.toDouble())
+            }.show()
+    }
     private lateinit var localBtn: Button
     private var player: ExoPlayer? = null
     private var castCtx: CastContext? = null
@@ -206,6 +218,15 @@ class MovieActivity : AppCompatActivity() {
         marks.add(btn("⏹ نهاية مقطع الآن") { markEnd() }, 1f)
         col.add(marks)
 
+        val cardRow = hbox()
+        wpsBtn = btn("⏱ سرعة الملخص: ${fmtWps(Store.wps)} كلمات/ث") { chooseWps() }
+        cardRow.add(wpsBtn, 1f)
+        val rc = SwitchCompat(this).apply {
+            text = "🔈 قراءته بصوت"; isChecked = Store.readCards; textSize = 14f
+            setOnCheckedChangeListener { _, c -> Store.readCards = c; if (!c) reader.stop(); if (tvActive()) TvLink.cmd("readcards", "on" to c) }
+        }
+        cardRow.add(rc)
+        col.add(cardRow)
         val sw = SwitchCompat(this).apply {
             text = "التجاوز مفعّل"; isChecked = Store.skipEnabled; textSize = 16f
             setOnCheckedChangeListener { _, c -> Store.skipEnabled = c; if (tvActive()) TvLink.cmd("skip", "on" to c) }
@@ -327,7 +348,7 @@ class MovieActivity : AppCompatActivity() {
         }
         fun upd() {
             val t = note.text.toString()
-            val n = t.trim().split(Regex("""\s+""")).count { it.isNotEmpty() }
+            val n = Util.words(t).size
             count.text = if (n == 0) "بلا ملخص" else
                 "$n كلمة • ${Util.slides(t).size} شريحة • نحو ${(Util.totalMs(t) + 500) / 1000} ثانية" +
                 (if (rg.checkedRadioButtonId == ids[0]) " (يتوقف الفيلم حتى تنتهي)" else " (تظهر على الغطاء)")
@@ -764,7 +785,7 @@ class MovieActivity : AppCompatActivity() {
         if (seg != null && !seg.playsThrough() && now - lastLocalSeek > 800) {
             lastLocalSeek = now
             p.seekTo((seg.end * 1000).toLong())
-            if (seg.note.isNotBlank()) { p.pause(); reader.speak(seg.note, reader.mode != 0); overlay.showCard(seg.note) { reader.stop(); player?.play() } }
+            if (seg.note.isNotBlank()) { p.pause(); if (Store.readCards) reader.speak(seg.note, true); overlay.showCard(seg.note) { reader.stop(); player?.play() } }
         }
         val through = seg?.takeIf { it.playsThrough() }
         overlay.cover(through, if (through != null) ((pos - through.start) * 1000).toLong().coerceAtLeast(0L) else 0L, Store.coverScale)
