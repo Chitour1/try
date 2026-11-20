@@ -192,7 +192,7 @@ object TvLink {
 
     fun segJson(m: Movie): JSONArray {
         val a = JSONArray()
-        for (s in m.segments) a.put(JSONObject().put("s", s.start).put("e", s.end).put("m", s.mute))
+        for (s in m.segments) a.put(JSONObject().put("s", s.start).put("e", s.end).put("m", s.mute).put("c", s.cover).put("n", s.note))
         return a
     }
 
@@ -211,5 +211,6 @@ object TvLink {
             .put("referer", m.referer).put("ua", m.userAgent).put("start", startMs)
             .put("segments", segJson(m)).put("skip", Store.skipEnabled)
             .put("subs", subs).put("subsOn", m.subsOn).put("subScale", Store.subScale.toDouble())
+            .put("coverScale", Store.coverScale.toDouble())
     }
 }

@@ -189,7 +189,7 @@ object CastCtl : RemoteMediaClient.ProgressListener {
         val pos = progressMs / 1000.0
         val seg = if (Store.skipEnabled) m.segments.firstOrNull { pos >= it.start - LEAD && pos < it.end } else null
         val now = SystemClock.elapsedRealtime()
-        if (seg != null && !seg.mute) {
+        if (seg != null && !seg.playsThrough()) {
             val target = (seg.end * 1000).toLong()
             if (now - lastSeek > 2000 || target != lastSkipTarget) {
                 lastSeek = now; lastSkipTarget = target

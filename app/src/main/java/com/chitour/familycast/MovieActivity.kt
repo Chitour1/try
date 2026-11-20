@@ -59,6 +59,8 @@ class MovieActivity : AppCompatActivity() {
     private lateinit var urlBox: EditText
     private lateinit var proxyChk: CheckBox
     private lateinit var playerView: PlayerView
+    private lateinit var pvBox: android.widget.FrameLayout
+    private lateinit var overlay: SceneOverlay
     private lateinit var localBtn: Button
     private var player: ExoPlayer? = null
     private var castCtx: CastContext? = null
@@ -134,8 +136,11 @@ class MovieActivity : AppCompatActivity() {
         play.add(localBtn, 0.7f)
         col.add(play)
 
-        playerView = PlayerView(this).apply { visibility = View.GONE }
-        col.add(playerView, h = dp(220))
+        pvBox = android.widget.FrameLayout(this).apply { visibility = View.GONE }
+        playerView = PlayerView(this)
+        pvBox.addView(playerView, android.widget.FrameLayout.LayoutParams(-1, -1))
+        overlay = SceneOverlay(pvBox, false)
+        col.add(pvBox, h = dp(220))
 
         // ---- جهاز التحكم ----
         col.add(label("جهاز التحكم", 17f, true))
@@ -227,6 +232,11 @@ class MovieActivity : AppCompatActivity() {
         sr.add(btn("الخط −") { subScale(-0.15f) }, 0.6f)
         sr.add(btn("الخط +") { subScale(0.15f) }, 0.6f)
         col.add(sr)
+        val cr = hbox().apply { gravity = Gravity.CENTER_VERTICAL }
+        cr.add(label("حجم الغطاء الأسود:", 14f), 1f)
+        cr.add(btn("أصغر") { coverScale(-0.15f) }, 0.6f)
+        cr.add(btn("أكبر") { coverScale(0.15f) }, 0.6f)
+        col.add(cr)
 
         // ---- البيانات ----
         col.add(label("بيانات الفيلم", 17f, true))
@@ -239,8 +249,10 @@ class MovieActivity : AppCompatActivity() {
 
         col.add(label(
             "طرق إدخال الأوقات:\n" +
-            "• سطر لكل مقطع: 0:12:30 - 0:13:05 (ويُكتب «كتم» في السطر لكتم الصوت بدل التجاوز).\n" +
-            "• ملف srt: كل ترجمة فيه مقطع يُحذف، وإن كان نصها «كتم» يُكتم صوتها.\n" +
+            "• سطر لكل مقطع: الوقتان ثم ما تريد. مثل: 0:12:30 - 0:13:05\n" +
+            "• بعد الوقتين: «كتم» لكتم الصوت، و«غطاء» لتغطية الترجمة بشريط أسود، ويمكن جمعهما «كتم غطاء».\n" +
+            "• أي كلام بعد ذلك هو ملخص يراه المشاهد: في التجاوز يتوقف الفيلم ويظهر في بطاقة، وفي الغطاء يُكتب على الشريط.\n" +
+            "• ملف srt بالطريقة نفسها: وقت كل ترجمة هو المقطع، ونصها هو «كتم» أو «غطاء» أو الملخص.\n" +
             "• ملف txt بالصيغة السطرية نفسها، أو ملف edl.\n" +
             "• أثناء المشاهدة: «بداية مقطع الآن» تسجّل قبل اللحظة بثلاث ثوانٍ، و«نهاية مقطع الآن» بعدها بثانية.\n" +
             "• أزرار الصوت في الهاتف تتحكم في صوت التلفاز أثناء العرض.", 13f))
@@ -256,7 +268,7 @@ class MovieActivity : AppCompatActivity() {
         if (movie.segments.isEmpty()) { segBox.add(label("لا مقاطع بعد.", 14f)); return }
         movie.segments.forEachIndexed { i, s ->
             val row = hbox().apply { gravity = Gravity.CENTER_VERTICAL }
-            val t = label("${i + 1}) من ${Util.fmt(s.start)} إلى ${Util.fmt(s.end)} — ${if (s.mute) "كتم الصوت" else "تجاوز"}" +
+            val t = label("${i + 1}) من ${Util.fmt(s.start)} إلى ${Util.fmt(s.end)} — ${s.kind()}" +
                     (if (s.note.isNotBlank()) "\n${s.note}" else ""), 14f)
             t.setOnClickListener { editSeg(s) }
             row.add(t, 1f)
@@ -278,18 +290,39 @@ class MovieActivity : AppCompatActivity() {
         }
         val en = EditText(this).apply { hint = "النهاية مثل 1:03:10"; setText(seg?.let { Util.fmt(it.end) } ?: "") }
         val rg = RadioGroup(this)
-        val r1 = RadioButton(this).apply { text = "تجاوز المقطع"; id = View.generateViewId() }
-        val r2 = RadioButton(this).apply { text = "كتم الصوت فقط"; id = View.generateViewId() }
-        rg.addView(r1); rg.addView(r2)
-        rg.check(if (seg?.mute == true) r2.id else r1.id)
-        val note = EditText(this).apply { hint = "ملاحظة (اختياري)"; setText(seg?.note ?: "") }
-        box.add(label("البداية")); box.add(st); box.add(label("النهاية")); box.add(en); box.add(rg); box.add(note)
-        AlertDialog.Builder(this).setTitle(if (seg == null) "مقطع جديد" else "تعديل المقطع").setView(box)
+        val opts = listOf("تجاوز المقطع", "كتم الصوت", "كتم الصوت + غطاء أسود على الترجمة", "غطاء أسود على الترجمة فقط")
+        val ids = opts.map { t -> RadioButton(this).apply { text = t; id = View.generateViewId() }.also { rg.addView(it) }.id }
+        val cur = when { seg == null -> 0; !seg.mute && !seg.cover -> 0; seg.mute && !seg.cover -> 1; seg.mute -> 2; else -> 3 }
+        rg.check(ids[cur])
+        val count = label("", 12f)
+        val note = EditText(this).apply {
+            hint = "ملخص يراه المشاهد (اختياري): مثل «في هذا المشهد يتعرّف سامي على ليلى»"
+            setText(seg?.note ?: ""); minLines = 2
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
+        }
+        fun upd() {
+            val t = note.text.toString()
+            val n = t.trim().split(Regex("""\s+""")).count { it.isNotEmpty() }
+            count.text = if (n == 0) "بلا ملخص" else
+                "$n كلمة • ${Util.slides(t).size} شريحة • نحو ${(Util.totalMs(t) + 500) / 1000} ثانية" +
+                (if (rg.checkedRadioButtonId == ids[0]) " (يتوقف الفيلم حتى تنتهي)" else " (تظهر على الغطاء)")
+        }
+        note.addTextChangedListener(object : android.text.TextWatcher {
+            override fun afterTextChanged(e: android.text.Editable?) { upd() }
+            override fun beforeTextChanged(a: CharSequence?, b: Int, c: Int, d: Int) {}
+            override fun onTextChanged(a: CharSequence?, b: Int, c: Int, d: Int) {}
+        })
+        rg.setOnCheckedChangeListener { _, _ -> upd() }
+        upd()
+        box.add(label("البداية")); box.add(st); box.add(label("النهاية")); box.add(en); box.add(rg); box.add(note); box.add(count)
+        AlertDialog.Builder(this).setTitle(if (seg == null) "مقطع جديد" else "تعديل المقطع").setView(ScrollView(this).apply { addView(box) })
             .setPositiveButton("حفظ") { _, _ ->
                 val s = Util.parse(st.text.toString()); val e = Util.parse(en.text.toString())
                 if (s == null || e == null || e <= s) { toast("الوقت غير صحيح: يجب أن تكون النهاية بعد البداية"); return@setPositiveButton }
-                if (seg == null) movie.segments.add(Segment(s, e, rg.checkedRadioButtonId == r2.id, note.text.toString()))
-                else { seg.start = s; seg.end = e; seg.mute = rg.checkedRadioButtonId == r2.id; seg.note = note.text.toString() }
+                val k = ids.indexOf(rg.checkedRadioButtonId).coerceAtLeast(0)
+                val mute = k == 1 || k == 2; val cover = k == 2 || k == 3
+                if (seg == null) movie.segments.add(Segment(s, e, mute, note.text.toString().trim(), cover))
+                else { seg.start = s; seg.end = e; seg.mute = mute; seg.cover = cover; seg.note = note.text.toString().trim() }
                 Store.save(); refreshSegs()
             }.setNegativeButton("إلغاء", null).show()
     }
@@ -305,7 +338,7 @@ class MovieActivity : AppCompatActivity() {
 
     private fun pasteList() {
         val box = EditText(this).apply {
-            hint = "0:12:30 - 0:13:05\n0:45:10 - 0:46:00 كتم\n1:20:00 - 1:21:30"
+            hint = "0:12:30 - 0:13:05\n0:30:00 - 0:31:10 في هذا المشهد يتعرّف سامي على ليلى\n0:45:10 - 0:46:00 كتم\n0:52:00 - 0:52:20 كتم غطاء يهدده بالقتل إن لم يدفع"
             minLines = 6; gravity = Gravity.TOP or Gravity.START
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
         }
@@ -376,6 +409,12 @@ class MovieActivity : AppCompatActivity() {
         Store.save(); refreshSubs()
         toast("أُضيفت الترجمة")
         if (casting()) reloadHere()
+    }
+
+    private fun coverScale(d: Float) {
+        Store.coverScale = (Store.coverScale + d).coerceIn(0.5f, 2.5f)
+        if (tvActive()) TvLink.cmd("coverscale", "v" to Store.coverScale.toDouble())
+        toast("حجم الغطاء: ${(Store.coverScale * 100).toInt()}٪")
     }
 
     private fun subScale(d: Float) {
@@ -579,7 +618,7 @@ class MovieActivity : AppCompatActivity() {
     private fun toggleLocal() {
         if (player != null) {
             player?.release(); player = null
-            playerView.player = null; playerView.visibility = View.GONE
+            playerView.player = null; pvBox.visibility = View.GONE; overlay.hideAll()
             localBtn.text = "📱 على الهاتف"
             return
         }
@@ -601,7 +640,7 @@ class MovieActivity : AppCompatActivity() {
         p.play()
         player = p
         playerView.player = p
-        playerView.visibility = View.VISIBLE
+        pvBox.visibility = View.VISIBLE
         localBtn.text = "⏹ أوقف الهاتف"
     }
 
@@ -626,6 +665,7 @@ class MovieActivity : AppCompatActivity() {
 
     private fun togglePlay() {
         if (tvActive()) TvLink.cmd("toggle")
+        else if (::overlay.isInitialized && overlay.cardActive) overlay.finishCard()
         else if (casting()) CastCtl.client()?.togglePlayback()
         else player?.let { if (it.isPlaying) it.pause() else it.play() }
     }
@@ -667,12 +707,15 @@ class MovieActivity : AppCompatActivity() {
         val p = player ?: return
         Store.savePos(movie, p.currentPosition, duration())
         val pos = p.currentPosition / 1000.0
-        val seg = if (Store.skipEnabled) movie.segments.firstOrNull { pos >= it.start - 0.3 && pos < it.end } else null
+        val seg = if (Store.skipEnabled && !overlay.cardActive) movie.segments.firstOrNull { pos >= it.start - 0.3 && pos < it.end } else null
         val now = SystemClock.elapsedRealtime()
-        if (seg != null && !seg.mute && now - lastLocalSeek > 800) {
+        if (seg != null && !seg.playsThrough() && now - lastLocalSeek > 800) {
             lastLocalSeek = now
             p.seekTo((seg.end * 1000).toLong())
+            if (seg.note.isNotBlank()) { p.pause(); overlay.showCard(seg.note) { player?.play() } }
         }
+        val through = seg?.takeIf { it.playsThrough() }
+        overlay.cover(through, if (through != null) ((pos - through.start) * 1000).toLong().coerceAtLeast(0L) else 0L, Store.coverScale)
         if (seg?.mute == true) p.volume = 0f else if (p.volume == 0f && lastMutedBySkip) p.volume = 1f
         lastMutedBySkip = seg?.mute == true
         volText.text = "${(p.volume * 100).toInt()}٪"

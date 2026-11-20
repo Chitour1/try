@@ -9,7 +9,12 @@ import kotlin.math.max
 
 data class Sub(var url: String, var label: String)
 
-data class Segment(var start: Double, var end: Double, var mute: Boolean = false, var note: String = "")
+/** mute: كتم الصوت بدل التجاوز • cover: غطاء أسود على الترجمة • note: ملخص يظهر للمشاهد */
+data class Segment(var start: Double, var end: Double, var mute: Boolean = false, var note: String = "", var cover: Boolean = false) {
+    fun kind() = when { !mute && !cover -> "تجاوز"; mute && cover -> "كتم وغطاء"; mute -> "كتم الصوت"; else -> "غطاء الترجمة" }
+    /** المقطع الذي لا يُتجاوز: يُكتم أو يُغطّى ويستمر العرض */
+    fun playsThrough() = mute || cover
+}
 
 class Movie(
     val id: String,
@@ -32,6 +37,9 @@ object Store {
     private lateinit var prefs: SharedPreferences
     val movies = mutableListOf<Movie>()
     var skipEnabled = true
+    var coverScale: Float
+        get() = prefs.getFloat("coverScale", 1.0f)
+        set(v) { prefs.edit().putFloat("coverScale", v).apply() }
     var subScale: Float
         get() = prefs.getFloat("subScale", 1.3f)
         set(v) { prefs.edit().putFloat("subScale", v).apply() }
@@ -51,7 +59,7 @@ object Store {
             val sa = o.optJSONArray("segments") ?: JSONArray()
             for (j in 0 until sa.length()) {
                 val s = sa.getJSONObject(j)
-                m.segments.add(Segment(s.optDouble("s"), s.optDouble("e"), s.optBoolean("m"), s.optString("n")))
+                m.segments.add(Segment(s.optDouble("s"), s.optDouble("e"), s.optBoolean("m"), s.optString("n"), s.optBoolean("c")))
             }
             val ua = o.optJSONArray("subs") ?: JSONArray()
             for (j in 0 until ua.length()) { val x = ua.getJSONObject(j); m.subs.add(Sub(x.optString("u"), x.optString("l"))) }
@@ -66,7 +74,7 @@ object Store {
         val arr = JSONArray()
         for (m in movies) {
             val sa = JSONArray()
-            for (s in m.segments) sa.put(JSONObject().put("s", s.start).put("e", s.end).put("m", s.mute).put("n", s.note))
+            for (s in m.segments) sa.put(JSONObject().put("s", s.start).put("e", s.end).put("m", s.mute).put("n", s.note).put("c", s.cover))
             val ua = JSONArray()
             for (x in m.subs) ua.put(JSONObject().put("u", x.url).put("l", x.label))
             arr.put(JSONObject().put("subs", ua).put("subsOn", m.subsOn).put("variant", m.variant).put("variantLabel", m.variantLabel).put("pos", m.pos).put("dur", m.dur).put("watchedAt", m.watchedAt).put("id", m.id).put("title", m.title).put("url", m.url)
@@ -149,9 +157,25 @@ object Util {
     private val srtRx = Regex("""(\d+:\d{1,2}:\d{1,2}(?:[.,]\d+)?)\s*-->\s*(\d+:\d{1,2}:\d{1,2}(?:[.,]\d+)?)""")
     private val edlRx = Regex("""^\s*(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)\s+([0-3])\s*$""")
 
-    private fun isMuteWord(t: String): Boolean {
-        val l = t.lowercase()
-        return l.contains("كتم") || l.contains("mute") || l.contains("صوت")
+    private val kwWords = setOf("كتم", "غطاء", "تغطية", "تجاوز", "mute", "cover", "skip", "و", "+", "-", "–", ":", "|", "،", ",")
+
+    /** ما بعد الأوقات: الكلمات الأولى «كتم» و«غطاء» تحدد النوع، وكل ما بعدها هو الملخص الذي يراه المشاهد */
+    private fun kindAndNote(rest: String): Triple<Boolean, Boolean, String> {
+        val toks = rest.trim().split(Regex("""\s+""")).filter { it.isNotEmpty() }
+        var i = 0
+        var mute = false; var cover = false
+        while (i < toks.size) {
+            val t = toks[i].lowercase().trim(',', '،', ':', '|')
+            val parts = t.split('+', '/').filter { it.isNotEmpty() }
+            if (t.isEmpty() || (parts.isNotEmpty() && parts.all { it in kwWords }) || t in kwWords) {
+                for (x in parts.ifEmpty { listOf(t) }) {
+                    if (x == "كتم" || x == "mute") mute = true
+                    if (x == "غطاء" || x == "تغطية" || x == "cover") cover = true
+                }
+                i++
+            } else break
+        }
+        return Triple(mute, cover, toks.drop(i).joinToString(" ").trim())
     }
 
     /** يقرأ نصًا يدويًا أو ملف txt أو srt أو edl */
@@ -163,8 +187,9 @@ object Util {
                 val m = srtRx.find(block) ?: continue
                 val s = parse(m.groupValues[1]) ?: continue
                 val e = parse(m.groupValues[2]) ?: continue
-                val rest = block.substring(m.range.last + 1).trim()
-                if (e > s) out.add(Segment(s, e, isMuteWord(rest), rest.lines().firstOrNull()?.take(60) ?: ""))
+                val rest = block.substring(m.range.last + 1).trim().replace('\n', ' ')
+                val (mu, co, note) = kindAndNote(rest)
+                if (e > s) out.add(Segment(s, e, mu, note, co))
             }
             return out
         }
@@ -175,19 +200,32 @@ object Util {
                 if (e > s) out.add(Segment(s, e, edl.groupValues[3] == "1"))
                 continue
             }
-            val ms = timeRx.findAll(line).map { it.value }.toList()
+            val ms = timeRx.findAll(line).toList()
             if (ms.size < 2) continue
-            val s = parse(ms[0]) ?: continue
-            val e = parse(ms[1]) ?: continue
+            val s = parse(ms[0].value) ?: continue
+            val e = parse(ms[1].value) ?: continue
             if (e <= s) continue
-            val after = line.substring(line.indexOf(ms[1]) + ms[1].length).trim()
-            out.add(Segment(s, e, isMuteWord(line), after.replace(Regex("^(-|–|:)+"), "").trim().take(60)))
+            val (mu, co, note) = kindAndNote(line.substring(ms[1].range.last + 1))
+            out.add(Segment(s, e, mu, note, co))
         }
         return out
     }
 
+    // ---- شرائح الملخص: 50 كلمة في الشريحة، وكل 5 كلمات ثانية ----
+    fun slides(text: String): List<String> {
+        val w = text.trim().split(Regex("""\s+""")).filter { it.isNotEmpty() }
+        return w.chunked(50).map { it.joinToString(" ") }
+    }
+    fun slideMs(slide: String): Long {
+        val n = slide.trim().split(Regex("""\s+""")).count { it.isNotEmpty() }
+        return maxOf(2500L, n * 200L)
+    }
+    fun totalMs(text: String): Long = slides(text).sumOf { slideMs(it) }
+    fun isArabic(t: String) = t.any { it in '\u0600'..'\u06FF' }
+
     fun segmentsToText(list: List<Segment>) = list.joinToString("\n") {
-        "${fmt(it.start)} - ${fmt(it.end)} ${if (it.mute) "كتم" else "تجاوز"}" + (if (it.note.isNotBlank()) " ${it.note}" else "")
+        val k = when { it.mute && it.cover -> "كتم غطاء"; it.mute -> "كتم"; it.cover -> "غطاء"; else -> "تجاوز" }
+        "${fmt(it.start)} - ${fmt(it.end)} $k" + (if (it.note.isNotBlank()) " | ${it.note}" else "")
     }
 
     /** حقل «userAgent» قد يحمل في سطوره التالية ترويسات إضافية بصيغة «الاسم: القيمة» */

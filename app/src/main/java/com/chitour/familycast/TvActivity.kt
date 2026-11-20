@@ -45,6 +45,8 @@ class TvActivity : AppCompatActivity() {
     }
 
     private lateinit var pv: PlayerView
+    private lateinit var overlay: SceneOverlay
+    private var coverScale = 1.0f
     private lateinit var idle: LinearLayout
     private lateinit var info: TextView
     private lateinit var note: TextView
@@ -86,6 +88,7 @@ class TvActivity : AppCompatActivity() {
             keepScreenOn = true
         }
         root.addView(pv, FrameLayout.LayoutParams(-1, -1))
+        overlay = SceneOverlay(root, true)
 
         idle = vbox().apply { gravity = Gravity.CENTER; setBackgroundColor(Color.parseColor("#0A3F4B")); setPadding(dp(48), dp(32), dp(48), dp(32)) }
         idle.add(label("عرض عائلي", 44f, true).apply { setTextColor(Color.WHITE); gravity = Gravity.CENTER })
@@ -141,7 +144,7 @@ class TvActivity : AppCompatActivity() {
         val out = mutableListOf<Segment>()
         if (a != null) for (i in 0 until a.length()) {
             val o = a.getJSONObject(i)
-            out.add(Segment(o.optDouble("s"), o.optDouble("e"), o.optBoolean("m")))
+            out.add(Segment(o.optDouble("s"), o.optDouble("e"), o.optBoolean("m"), o.optString("n"), o.optBoolean("c")))
         }
         return out.sortedBy { it.start }
     }
@@ -158,6 +161,8 @@ class TvActivity : AppCompatActivity() {
 
     fun load(j: JSONObject) {
         savePos()
+        overlay.hideAll()
+        coverScale = j.optDouble("coverScale", 1.0).toFloat()
         try { player?.release() } catch (e: Exception) { }
         movieId = j.optString("id"); mTitle = j.optString("title")
         segs = parseSegs(j.optJSONArray("segments"))
@@ -263,6 +268,7 @@ class TvActivity : AppCompatActivity() {
 
     private fun stopPlayback() {
         savePos()
+        overlay.hideAll()
         try { player?.release() } catch (e: Exception) { }
         player = null; pv.player = null
         movieId = ""; mTitle = ""; segs = emptyList()
@@ -273,7 +279,7 @@ class TvActivity : AppCompatActivity() {
     fun cmd(j: JSONObject) {
         val p = player
         when (j.optString("a")) {
-            "toggle" -> p?.let { if (it.isPlaying) { it.pause(); show("⏸ إيقاف مؤقت") } else { it.play(); show("▶ تشغيل") } }
+            "toggle" -> if (overlay.cardActive) overlay.finishCard() else p?.let { if (it.isPlaying) { it.pause(); show("⏸ إيقاف مؤقت") } else { it.play(); show("▶ تشغيل") } }
             "seek" -> p?.seekTo(max(0L, j.optLong("ms")))
             "rel" -> p?.let { val d = j.optLong("ms"); it.seekTo(max(0L, it.currentPosition + d)); show(if (d > 0) "⏩ ${d / 1000} ث" else "⏪ ${-d / 1000} ث", 1500) }
             "vol" -> audio.adjustStreamVolume(AudioManager.STREAM_MUSIC,
@@ -284,6 +290,8 @@ class TvActivity : AppCompatActivity() {
             "segments" -> { if (j.optString("id") == movieId) segs = parseSegs(j.optJSONArray("list")) }
             "subs" -> { subsOn = j.optBoolean("on", true); applySubs(j.optDouble("scale", 1.3).toFloat()) }
             "subscale" -> applySubs(j.optDouble("v", 1.3).toFloat())
+            "coverscale" -> coverScale = j.optDouble("v", 1.0).toFloat()
+            "card" -> overlay.finishCard()
             "quality" -> setQuality(j.optInt("h"))
             "rename" -> { Store.setPref("tvName", j.optString("name")); refreshIdle() }
         }
@@ -296,13 +304,16 @@ class TvActivity : AppCompatActivity() {
             if (p.playbackState == Player.STATE_READY) lastPos = pos
             if (p.isPlaying && ++okTicks > 300) { retries = 0; okTicks = 0 }
             val sec = pos / 1000.0
-            val seg = if (skipOn) segs.firstOrNull { sec >= it.start - 0.3 && sec < it.end } else null
+            val seg = if (skipOn && !overlay.cardActive) segs.firstOrNull { sec >= it.start - 0.3 && sec < it.end } else null
             val now = SystemClock.elapsedRealtime()
-            if (seg != null && !seg.mute && now - lastSeek > 800) {
+            if (seg != null && !seg.playsThrough() && now - lastSeek > 800) {
                 lastSeek = now
                 p.seekTo((seg.end * 1000).toLong())
-                show("⏭ تجاوزت مقطعًا", 2000)
+                if (seg.note.isNotBlank()) { p.pause(); overlay.showCard(seg.note) { player?.play() } }
+                else show("⏭ تجاوزت مقطعًا", 2000)
             }
+            val through = seg?.takeIf { it.playsThrough() }
+            overlay.cover(through, if (through != null) ((sec - through.start) * 1000).toLong().coerceAtLeast(0L) else 0L, coverScale)
             if (seg?.mute == true) { if (!mutedBySkip) { mutedBySkip = true; p.volume = 0f; show("🔇 كتم مؤقت", 2000) } }
             else if (mutedBySkip) { mutedBySkip = false; p.volume = 1f }
             if (now - lastSave > 5000) { lastSave = now; savePos() }
@@ -322,13 +333,17 @@ class TvActivity : AppCompatActivity() {
             .put("pos", p?.currentPosition ?: 0L).put("dur", p?.duration?.takeIf { it > 0 } ?: 0L)
             .put("vol", audio.getStreamVolume(AudioManager.STREAM_MUSIC) * 100 / max)
             .put("mute", audio.isStreamMute(AudioManager.STREAM_MUSIC))
-            .put("skip", skipOn).put("subsOn", subsOn).put("qualities", q).put("msg", msg)
+            .put("skip", skipOn).put("subsOn", subsOn).put("card", overlay.cardActive).put("qualities", q).put("msg", msg)
             .put("name", tvName())
             .toString()
     }
 
     override fun dispatchKeyEvent(e: KeyEvent): Boolean {
         val p = player
+        if (e.action == KeyEvent.ACTION_DOWN && overlay.cardActive &&
+            (e.keyCode == KeyEvent.KEYCODE_DPAD_CENTER || e.keyCode == KeyEvent.KEYCODE_ENTER || e.keyCode == KeyEvent.KEYCODE_BACK)) {
+            overlay.finishCard(); return true
+        }
         if (e.action == KeyEvent.ACTION_DOWN && p != null) {
             if (!pv.isControllerFullyVisible) when (e.keyCode) {
                 KeyEvent.KEYCODE_DPAD_LEFT -> { p.seekTo(max(0L, p.currentPosition - 10_000)); show("⏪ 10 ثوانٍ", 1200); return true }
