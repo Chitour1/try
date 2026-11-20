@@ -794,6 +794,7 @@ class MovieActivity : AppCompatActivity() {
         castCtx?.sessionManager?.removeSessionManagerListener(sessionListener, CastSession::class.java)
         CastCtl.onStatus = null
         TvLink.onChange = null
+        TvLink.syncLibrary()
         handler.removeCallbacks(loop)
         saveFields()
         player?.pause()
